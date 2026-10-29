@@ -5,6 +5,7 @@ public class SedeDTO {
     private Long id;
     private String name;
     private String address;
+    private String barrio;
     private String phone;
     private String schedule;
     private String image;

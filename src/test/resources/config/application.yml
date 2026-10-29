@@ -1,0 +1,29 @@
+# Solo existe en el classpath de pruebas. classpath:/config/application.yml tiene prioridad
+# sobre classpath:/application.yml, pero no sobre variables de entorno ni propiedades del sistema
+# (SPRING_DATASOURCE_URL, SPRING_DATASOURCE_HIKARI_JDBC_URL...): por eso TestDatabaseGuard comprueba
+# el destino efectivo y aborta si no es un PostgreSQL local con "test" en el nombre.
+# Requiere un PostgreSQL local desechable (ver TEST_DATABASE_URL).
+spring:
+  datasource:
+    url: ${TEST_DATABASE_URL:jdbc:postgresql://localhost:54329/jdq_test}
+    username: ${TEST_DATABASE_USERNAME:jdqtest}
+    password: ${TEST_DATABASE_PASSWORD:}
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+    show-sql: false
+    properties:
+      hibernate:
+        generate_statistics: true
+        format_sql: false
+
+# Sin la tarea programada en segundo plano: las pruebas de vencimiento la ejecutan de forma explícita.
+# La compra pública queda con su valor por defecto (desactivada); PublicTicketPurchaseTest la activa.
+app:
+  raffle-purchase:
+    expiry-job-enabled: false
+
+logging:
+  level:
+    org.hibernate.SQL: INFO
+    org.hibernate.stat: WARN

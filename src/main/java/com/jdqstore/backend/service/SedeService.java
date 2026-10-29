@@ -37,6 +37,7 @@ public class SedeService {
         dto.setId(entity.getId());
         dto.setName(entity.getName());
         dto.setAddress(entity.getAddress());
+        dto.setBarrio(entity.getBarrio());
         dto.setPhone(entity.getPhone());
         dto.setSchedule(entity.getSchedule());
         dto.setImage(entity.getImage());
@@ -46,6 +47,7 @@ public class SedeService {
     private Sede mapToEntity(SedeDTO dto, Sede entity) {
         entity.setName(dto.getName());
         entity.setAddress(dto.getAddress());
+        entity.setBarrio(dto.getBarrio());
         entity.setPhone(dto.getPhone());
         entity.setSchedule(dto.getSchedule());
         entity.setImage(dto.getImage());

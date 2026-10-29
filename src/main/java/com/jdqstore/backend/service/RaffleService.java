@@ -75,13 +75,19 @@ public class RaffleService {
 
     @Transactional
     public RaffleDTO update(Long id, RaffleDTO dto) {
-        Raffle entity = repository.findById(id).orElseThrow();
+        // Mismo bloqueo que purchaseTickets: se guarda la fila completa, y sin el una edicion que leyo la rifa
+        // antes del commit de una compra sobrescribia available_tickets con el valor anterior
+        Raffle entity = repository.findByIdForUpdate(id).orElseThrow();
         entity = mapToEntity(dto, entity);
         return mapToDTO(repository.save(entity));
     }
 
     @Transactional
     public void delete(Long id) {
+        // Bloquea la rifa antes que los boletos, en el mismo orden que purchaseTickets/approveTicket:
+        // con el orden inverso, una compra concurrente provocaba un deadlock. Si la rifa no existe se
+        // mantiene el comportamiento anterior (no hace nada)
+        repository.findByIdForUpdate(id);
         ticketRepository.deleteByRaffleId(id);
         repository.deleteById(id);
     }

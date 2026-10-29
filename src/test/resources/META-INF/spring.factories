@@ -1,0 +1,2 @@
+org.springframework.boot.env.EnvironmentPostProcessor=com.jdqstore.backend.support.TestDatabaseGuard
+org.springframework.context.ApplicationContextInitializer=com.jdqstore.backend.support.TestDatabaseGuard

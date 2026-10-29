@@ -1,6 +1,7 @@
 package com.jdqstore.backend.entity;
 import jakarta.persistence.*;
 import lombok.*;
+import java.time.Instant;
 import java.time.LocalDateTime;
 
 @Entity
@@ -28,6 +29,11 @@ public class Ticket {
 
     @Column(name = "updated_at")
     private LocalDateTime updatedAt;
+
+    // Vencimiento de una reserva pendiente de pago (timestamptz). Null en boletos libres, vendidos y en las
+    // reservas anteriores a esta columna, que no vencen automáticamente
+    @Column(name = "reservation_expires_at")
+    private Instant reservationExpiresAt;
 
     @PreUpdate
     @PrePersist

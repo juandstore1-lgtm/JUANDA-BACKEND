@@ -1,6 +1,7 @@
 package com.jdqstore.backend.controller;
 
 import com.jdqstore.backend.dto.PublicParticipantDTO;
+import com.jdqstore.backend.dto.PublicWinnerDTO;
 import com.jdqstore.backend.entity.Contest;
 import com.jdqstore.backend.entity.ContestParticipant;
 import com.jdqstore.backend.entity.ContestWinner;
@@ -88,8 +89,9 @@ public class ContestController {
             return ResponseEntity.ok(null);
         }
 
+        // Sin datos de contacto del ganador: el detalle completo está en /admin/{id}/winner
         Optional<ContestWinner> winner = winnerRepository.findByContestId(targetId);
-        return ResponseEntity.ok(winner.orElse(null));
+        return ResponseEntity.ok(winner.map(PublicWinnerDTO::fromEntity).orElse(null));
     }
 
     @GetMapping("/public/participants")
@@ -151,6 +153,11 @@ public class ContestController {
     @GetMapping("/admin/{id}/participants")
     public ResponseEntity<List<ContestParticipant>> getParticipants(@PathVariable Long id) {
         return ResponseEntity.ok(participantRepository.findByContestIdOrderByIdDesc(id));
+    }
+
+    @GetMapping("/admin/{id}/winner")
+    public ResponseEntity<ContestWinner> getWinner(@PathVariable Long id) {
+        return ResponseEntity.ok(winnerRepository.findByContestId(id).orElse(null));
     }
 
     @PostMapping("/admin/{id}/select-winner")

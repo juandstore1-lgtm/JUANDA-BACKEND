@@ -15,6 +15,7 @@ public class Sede {
     private String name;
     
     private String address;
+    private String barrio;
     private String phone;
     private String schedule;
     @Column(columnDefinition = "TEXT")

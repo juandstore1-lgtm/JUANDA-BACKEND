@@ -4,6 +4,8 @@ import com.jdqstore.backend.entity.Product;
 import com.jdqstore.backend.repository.ProductRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -14,9 +16,11 @@ public class ProductService {
     private final com.jdqstore.backend.repository.SedeRepository sedeRepository;
 
 
+    @Transactional(readOnly = true)
     public List<ProductDTO> findAll() {
         return repository.findAll().stream().map(this::mapToDTO).collect(Collectors.toList());
     }
+    @Transactional(readOnly = true)
     public ProductDTO findById(Long id) {
         return repository.findById(id).map(this::mapToDTO).orElseThrow();
     }
@@ -42,14 +46,18 @@ public class ProductService {
         dto.setDiscountPercentage(entity.getDiscountPercentage());
         dto.setDescription(entity.getDescription());
         dto.setCategory(entity.getCategory());
-        dto.setSizes(entity.getSizes());
-        dto.setColors(entity.getColors());
-        dto.setImages(entity.getImages());
+        dto.setSizes(copyOf(entity.getSizes()));
+        dto.setColors(copyOf(entity.getColors()));
+        dto.setImages(copyOf(entity.getImages()));
         dto.setStatus(entity.getStatus());
-        dto.setTags(entity.getTags());
+        dto.setTags(copyOf(entity.getTags()));
         dto.setOrder(entity.getOrder());
         if (entity.getStores() != null) dto.setStoreIds(entity.getStores().stream().map(s -> s.getId()).toList());
         return dto;
+    }
+    // Copia la coleccion en el servicio para que no se cargue de forma perezosa durante la serializacion JSON
+    private static List<String> copyOf(List<String> values) {
+        return values == null ? null : new ArrayList<>(values);
     }
     private Product mapToEntity(ProductDTO dto, Product entity) {
         entity.setName(dto.getName());

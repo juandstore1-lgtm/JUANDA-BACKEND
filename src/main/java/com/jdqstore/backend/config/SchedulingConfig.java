@@ -1,0 +1,18 @@
+package com.jdqstore.backend.config;
+
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.scheduling.annotation.EnableScheduling;
+
+import java.time.Clock;
+
+@Configuration
+@EnableScheduling
+public class SchedulingConfig {
+
+    // Las reservas se guardan como instantes UTC (timestamptz): no dependen de la zona horaria del servidor
+    @Bean
+    public Clock clock() {
+        return Clock.systemUTC();
+    }
+}

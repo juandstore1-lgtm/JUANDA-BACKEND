@@ -2,6 +2,7 @@ package com.jdqstore.backend.repository;
 
 import com.jdqstore.backend.entity.ContestParticipant;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
@@ -22,5 +23,8 @@ public interface ContestParticipantRepository extends JpaRepository<ContestParti
 
     boolean existsByContestIdAndIdentificationNumber(Long contestId, String identificationNumber);
 
-    void deleteByContestId(Long contestId);
+    // Borrado masivo en una sola sentencia (el delete derivado cargaba y borraba cada fila por separado)
+    @Modifying
+    @Query("DELETE FROM ContestParticipant p WHERE p.contest.id = :contestId")
+    void deleteByContestId(@Param("contestId") Long contestId);
 }
