@@ -1,5 +1,10 @@
 server:
   port: ${PORT:8080}
+  # Comprime las respuestas JSON grandes (solo si el cliente envía Accept-Encoding)
+  compression:
+    enabled: true
+    mime-types: application/json
+    min-response-size: 2KB
 
 spring:
   datasource:

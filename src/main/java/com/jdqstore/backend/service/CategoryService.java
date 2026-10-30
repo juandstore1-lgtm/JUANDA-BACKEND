@@ -21,6 +21,20 @@ public class CategoryService {
         return categories.stream().map(this::mapToDTO).collect(Collectors.toList());
     }
 
+    // Mismo listado con image = null: no lee la columna image en la base de datos
+    public List<CategoryDTO> findAllWithoutImages(Long storeId) {
+        List<CategoryRepository.CategorySummary> categories = (storeId != null)
+            ? repository.findSummariesByStoreId(storeId)
+            : repository.findAllSummaries();
+        return categories.stream().map(c -> {
+            CategoryDTO dto = new CategoryDTO();
+            dto.setId(c.getId());
+            dto.setName(c.getName());
+            dto.setStoreId(c.getStoreId());
+            return dto;
+        }).collect(Collectors.toList());
+    }
+
     public CategoryDTO findById(Long id) {
         return repository.findById(id).map(this::mapToDTO).orElseThrow();
     }

@@ -16,8 +16,9 @@ public class CategoryController {
     private final SedeAccessService sedeAccess;
 
     @GetMapping
-    public ResponseEntity<List<CategoryDTO>> getAll(@RequestParam(required = false) Long storeId) {
-        return ResponseEntity.ok(service.findAll(storeId));
+    public ResponseEntity<List<CategoryDTO>> getAll(@RequestParam(required = false) Long storeId,
+                                                    @RequestParam(defaultValue = "true") boolean includeImage) {
+        return ResponseEntity.ok(includeImage ? service.findAll(storeId) : service.findAllWithoutImages(storeId));
     }
 
     @GetMapping("/{id}")

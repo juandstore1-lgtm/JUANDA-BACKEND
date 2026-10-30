@@ -184,6 +184,26 @@ class SecurityAuthorizationTest {
         }
     }
 
+    @Test
+    void categoriesWithoutImagesKeepTheSameListAndOnlyDropTheImage() throws Exception {
+        jdbc.update("UPDATE categories SET image = 'data:image/jpeg;base64,' || repeat('A', 100000) WHERE id IN (21, 23)");
+
+        for (String filter : List.of("", "?storeId=11", "?storeId=12", "?storeId=99")) {
+            String sep = filter.isEmpty() ? "?" : "&";
+            String full = body(mockMvc.perform(get("/api/categories" + filter)).andReturn());
+            String sameAsDefault = body(mockMvc.perform(get("/api/categories" + filter + sep + "includeImage=true")).andReturn());
+            String light = body(mockMvc.perform(get("/api/categories" + filter + sep + "includeImage=false")).andReturn());
+
+            JSONAssert.assertEquals(full, sameAsDefault, JSONCompareMode.STRICT);
+            JSONAssert.assertEquals(full.replaceAll("\"data:image/jpeg;base64,A+\"", "null"), light, JSONCompareMode.STRICT);
+            assertThat(light).as(filter).doesNotContain("base64");
+        }
+        JSONAssert.assertEquals("[{\"id\":21,\"name\":\"Cat Norte\",\"image\":null,\"storeId\":11}]",
+                body(mockMvc.perform(get("/api/categories?storeId=11&includeImage=false")).andReturn()), JSONCompareMode.STRICT);
+        assertThat(body(mockMvc.perform(get("/api/categories?includeImage=false")).andReturn()))
+                .contains("\"id\":23,\"name\":\"Cat Global\",\"image\":null,\"storeId\":null");
+    }
+
     // --- SEC-B: anónimo ----------------------------------------------------------------------------------
 
     @Test
