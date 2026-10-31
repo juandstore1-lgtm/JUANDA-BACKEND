@@ -56,11 +56,20 @@ public class ContestController {
             return ResponseEntity.badRequest().body(Map.of("message", "Este concurso ya ha finalizado o se encuentra deshabilitado."));
         }
 
+        // Sanitize email: if blank/empty, normalize to null
+        if (participant.getEmail() != null && participant.getEmail().trim().isEmpty()) {
+            participant.setEmail(null);
+        } else if (participant.getEmail() != null) {
+            participant.setEmail(participant.getEmail().trim().toLowerCase());
+        }
+
         // Validate duplicates safely
-        boolean duplicateEmail = participant.getEmail() != null && participantRepository.existsByContestIdAndEmail(contest.getId(), participant.getEmail());
-        boolean duplicatePhone = participant.getPhone() != null && participantRepository.existsByContestIdAndPhone(contest.getId(), participant.getPhone());
+        boolean duplicateEmail = participant.getEmail() != null && !participant.getEmail().isEmpty()
+                && participantRepository.existsByContestIdAndEmail(contest.getId(), participant.getEmail());
+        boolean duplicatePhone = participant.getPhone() != null && !participant.getPhone().trim().isEmpty()
+                && participantRepository.existsByContestIdAndPhone(contest.getId(), participant.getPhone().trim());
         boolean duplicateId = participant.getIdentificationNumber() != null && !participant.getIdentificationNumber().trim().isEmpty()
-            && participantRepository.existsByContestIdAndIdentificationNumber(contest.getId(), participant.getIdentificationNumber());
+                && participantRepository.existsByContestIdAndIdentificationNumber(contest.getId(), participant.getIdentificationNumber().trim());
 
         if (duplicateEmail || duplicatePhone || duplicateId) {
             return ResponseEntity.badRequest().body(Map.of("message", "Ya encontramos una participación registrada con este correo, teléfono o documento para este concurso."));
