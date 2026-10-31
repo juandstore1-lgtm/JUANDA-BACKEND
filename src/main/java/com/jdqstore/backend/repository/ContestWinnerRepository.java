@@ -16,4 +16,8 @@ public interface ContestWinnerRepository extends JpaRepository<ContestWinner, Lo
     @Modifying
     @Query("DELETE FROM ContestWinner w WHERE w.contest.id = :contestId")
     void deleteByContestId(@Param("contestId") Long contestId);
+
+    @Modifying
+    @Query("DELETE FROM ContestWinner w WHERE w.participant.id = :participantId")
+    void deleteByParticipantId(@Param("participantId") Long participantId);
 }

@@ -226,4 +226,25 @@ public class ContestController {
 
         return ResponseEntity.ok(Map.of("message", "Concurso reseteado con éxito. Se eliminaron todos los participantes y registros asociados."));
     }
+
+    @PutMapping("/admin/participants/{participantId}/toggle-display")
+    @Transactional
+    public ResponseEntity<?> toggleParticipantDisplay(@PathVariable Long participantId) {
+        return participantRepository.findById(participantId).map(p -> {
+            boolean current = Boolean.TRUE.equals(p.getAgreesToPublicDisplay());
+            p.setAgreesToPublicDisplay(!current);
+            ContestParticipant saved = participantRepository.save(p);
+            return ResponseEntity.ok(saved);
+        }).orElseGet(() -> ResponseEntity.notFound().build());
+    }
+
+    @DeleteMapping("/admin/participants/{participantId}")
+    @Transactional
+    public ResponseEntity<?> deleteParticipant(@PathVariable Long participantId) {
+        return participantRepository.findById(participantId).map(p -> {
+            winnerRepository.deleteByParticipantId(participantId);
+            participantRepository.delete(p);
+            return ResponseEntity.ok(Map.of("message", "Participante eliminado exitosamente."));
+        }).orElseGet(() -> ResponseEntity.notFound().build());
+    }
 }
