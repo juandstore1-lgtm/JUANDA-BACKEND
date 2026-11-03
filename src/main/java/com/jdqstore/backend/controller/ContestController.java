@@ -9,6 +9,8 @@ import com.jdqstore.backend.repository.ContestParticipantRepository;
 import com.jdqstore.backend.repository.ContestRepository;
 import com.jdqstore.backend.repository.ContestWinnerRepository;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import com.jdqstore.backend.service.R2StorageService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
@@ -19,11 +21,13 @@ import java.util.*;
 @RestController
 @RequestMapping("/api/contests")
 @RequiredArgsConstructor
+@Slf4j
 public class ContestController {
 
     private final ContestRepository contestRepository;
     private final ContestParticipantRepository participantRepository;
     private final ContestWinnerRepository winnerRepository;
+    private final R2StorageService storageService;
 
     // --- PUBLIC ENDPOINTS ---
 
@@ -77,6 +81,15 @@ public class ContestController {
 
         if (Boolean.FALSE.equals(participant.getAcceptedTerms())) {
             return ResponseEntity.badRequest().body(Map.of("message", "Debes aceptar los términos y condiciones del concurso para participar."));
+        }
+
+        if (participant.getOutfitImageUrl() != null && storageService.isBase64Image(participant.getOutfitImageUrl())) {
+            try {
+                String r2Url = storageService.uploadBase64(participant.getOutfitImageUrl(), "participants", null);
+                participant.setOutfitImageUrl(r2Url);
+            } catch (Exception e) {
+                log.warn("Could not auto-upload participant outfit to R2: {}", e.getMessage());
+            }
         }
 
         participant.setStatus(ContestParticipant.ParticipantStatus.PARTICIPANT);
@@ -134,6 +147,14 @@ public class ContestController {
 
     @PostMapping("/admin")
     public ResponseEntity<Contest> createContest(@RequestBody Contest contest) {
+        if (contest.getBannerUrl() != null && storageService.isBase64Image(contest.getBannerUrl())) {
+            try {
+                String r2Url = storageService.uploadBase64(contest.getBannerUrl(), "contests", null);
+                contest.setBannerUrl(r2Url);
+            } catch (Exception e) {
+                log.warn("Could not auto-upload contest banner to R2: {}", e.getMessage());
+            }
+        }
         if (contest.getStatus() == null) {
             contest.setStatus(Contest.ContestStatus.ACTIVE);
         }
@@ -146,7 +167,15 @@ public class ContestController {
             existing.setTitle(updated.getTitle());
             existing.setDescription(updated.getDescription());
             existing.setRules(updated.getRules());
-            existing.setBannerUrl(updated.getBannerUrl());
+            String banner = updated.getBannerUrl();
+            if (banner != null && storageService.isBase64Image(banner)) {
+                try {
+                    banner = storageService.uploadBase64(banner, "contests", String.valueOf(existing.getId()));
+                } catch (Exception e) {
+                    log.warn("Could not auto-upload contest banner to R2: {}", e.getMessage());
+                }
+            }
+            existing.setBannerUrl(banner);
             existing.setStartDate(updated.getStartDate());
             existing.setEndDate(updated.getEndDate());
             existing.setStatus(updated.getStatus());

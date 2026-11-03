@@ -28,3 +28,13 @@ application:
       refresh-token:
         expiration: 604800000 # 7 days
 
+cloudflare:
+  r2:
+    account-id: ${R2_ACCOUNT_ID:2946e9ab97bba1f6be5a7c182e8bede3}
+    access-key-id: ${R2_ACCESS_KEY_ID:67292ce9a873a6e83d92440a89f0933b}
+    secret-access-key: ${R2_SECRET_ACCESS_KEY:ac719eb47823ff8b8a11697b4323499941be2c4500593bb04332148774c6ab14}
+    bucket-name: ${R2_BUCKET_NAME:juandstore}
+    public-url-base: ${R2_PUBLIC_URL_BASE:https://pub-63cfe435c9854d2e85c789dd3e2f6e52.r2.dev}
+    presigned-url-expiration-minutes: ${R2_PRESIGNED_EXPIRATION_MINUTES:15}
+
+

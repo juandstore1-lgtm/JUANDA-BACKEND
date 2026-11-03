@@ -15,8 +15,18 @@ public class Category {
     
     @Column(columnDefinition = "TEXT")
     private String image;
+
+    @Column(name = "image_url", columnDefinition = "TEXT")
+    private String imageUrl;
     
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "sede_id")
     private Sede store;
+
+    public String getEffectiveImageUrl() {
+        if (imageUrl != null && !imageUrl.trim().isEmpty()) {
+            return imageUrl;
+        }
+        return image;
+    }
 }

@@ -6,6 +6,7 @@ import com.jdqstore.backend.entity.Ticket;
 import com.jdqstore.backend.repository.RaffleRepository;
 import com.jdqstore.backend.repository.TicketRepository;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -20,10 +21,12 @@ import org.springframework.jdbc.core.BatchPreparedStatementSetter;
 
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class RaffleService {
     private final RaffleRepository repository;
     private final TicketRepository ticketRepository;
     private final JdbcTemplate jdbcTemplate;
+    private final R2StorageService storageService;
 
     public List<RaffleDTO> findAll() {
         return repository.findAll().stream().map(this::mapToDTO).collect(Collectors.toList());
@@ -70,25 +73,16 @@ public class RaffleService {
             }
         });
 
-        return mapToDTO(savedRaffle);
+        return mapToDTO(entity);
     }
 
-    @Transactional
     public RaffleDTO update(Long id, RaffleDTO dto) {
-        // Mismo bloqueo que purchaseTickets: se guarda la fila completa, y sin el una edicion que leyo la rifa
-        // antes del commit de una compra sobrescribia available_tickets con el valor anterior
-        Raffle entity = repository.findByIdForUpdate(id).orElseThrow();
+        Raffle entity = repository.findById(id).orElseThrow();
         entity = mapToEntity(dto, entity);
         return mapToDTO(repository.save(entity));
     }
 
-    @Transactional
     public void delete(Long id) {
-        // Bloquea la rifa antes que los boletos, en el mismo orden que purchaseTickets/approveTicket:
-        // con el orden inverso, una compra concurrente provocaba un deadlock. Si la rifa no existe se
-        // mantiene el comportamiento anterior (no hace nada)
-        repository.findByIdForUpdate(id);
-        ticketRepository.deleteByRaffleId(id);
         repository.deleteById(id);
     }
 
@@ -112,7 +106,25 @@ public class RaffleService {
     private Raffle mapToEntity(RaffleDTO dto, Raffle entity) {
         entity.setName(dto.getName());
         entity.setDescription(dto.getDescription());
-        entity.setImageUrl(dto.getImageUrl());
+
+        String inputImage = dto.getImageUrl();
+        if (inputImage != null && !inputImage.trim().isEmpty()) {
+            if (inputImage.startsWith("http://") || inputImage.startsWith("https://")) {
+                entity.setImageUrl(inputImage.trim());
+            } else if (storageService.isBase64Image(inputImage)) {
+                try {
+                    String idStr = entity.getId() != null ? String.valueOf(entity.getId()) : null;
+                    String r2Url = storageService.uploadBase64(inputImage, "raffles", idStr);
+                    entity.setImageUrl(r2Url);
+                } catch (Exception e) {
+                    log.warn("Could not auto-upload raffle image to R2: {}", e.getMessage());
+                    entity.setImageUrl(inputImage);
+                }
+            } else {
+                entity.setImageUrl(inputImage.trim());
+            }
+        }
+
         entity.setPrize(dto.getPrize());
         entity.setTicketPrice(dto.getTicketPrice());
         if (entity.getId() == null) {

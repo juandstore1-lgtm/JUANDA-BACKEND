@@ -5,6 +5,8 @@ import com.jdqstore.backend.repository.*;
 import lombok.RequiredArgsConstructor;
 import lombok.Data;
 import lombok.AllArgsConstructor;
+import com.jdqstore.backend.service.R2StorageService;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import java.util.List;
@@ -12,12 +14,14 @@ import java.util.List;
 @RestController
 @RequestMapping("/api/home")
 @RequiredArgsConstructor
+@Slf4j
 @CrossOrigin(origins = "*")
 public class HomeController {
     private final HeroSlideRepository heroSlideRepository;
     private final RouletteSettingRepository rouletteSettingRepository;
     private final MysteryBoxSettingRepository mysteryBoxSettingRepository;
     private final HomeCategoryCollectionRepository homeCategoryCollectionRepository;
+    private final R2StorageService storageService;
 
     @GetMapping("/hero")
     public ResponseEntity<HeroConfigResponse> getHeroConfig() {
@@ -76,11 +80,25 @@ public class HomeController {
 
     @PostMapping("/hero/slides")
     public ResponseEntity<HeroSlide> addSlide(@RequestBody HeroSlide slide) {
+        if (slide.getImageUrl() != null && storageService.isBase64Image(slide.getImageUrl())) {
+            try {
+                slide.setImageUrl(storageService.uploadBase64(slide.getImageUrl(), "hero-slides", null));
+            } catch (Exception e) {
+                log.warn("Could not auto-upload hero slide to R2: {}", e.getMessage());
+            }
+        }
         return ResponseEntity.ok(heroSlideRepository.save(slide));
     }
 
     @PutMapping("/hero/slides/{id}")
     public ResponseEntity<HeroSlide> updateSlide(@PathVariable Long id, @RequestBody HeroSlide slide) {
+        if (slide.getImageUrl() != null && storageService.isBase64Image(slide.getImageUrl())) {
+            try {
+                slide.setImageUrl(storageService.uploadBase64(slide.getImageUrl(), "hero-slides", String.valueOf(id)));
+            } catch (Exception e) {
+                log.warn("Could not auto-upload hero slide to R2: {}", e.getMessage());
+            }
+        }
         slide.setId(id);
         return ResponseEntity.ok(heroSlideRepository.save(slide));
     }
@@ -98,11 +116,25 @@ public class HomeController {
 
     @PostMapping("/collections")
     public ResponseEntity<HomeCategoryCollection> createCollection(@RequestBody HomeCategoryCollection item) {
+        if (item.getImageUrl() != null && storageService.isBase64Image(item.getImageUrl())) {
+            try {
+                item.setImageUrl(storageService.uploadBase64(item.getImageUrl(), "collections", null));
+            } catch (Exception e) {
+                log.warn("Could not auto-upload collection image to R2: {}", e.getMessage());
+            }
+        }
         return ResponseEntity.ok(homeCategoryCollectionRepository.save(item));
     }
 
     @PutMapping("/collections/{id}")
     public ResponseEntity<HomeCategoryCollection> updateCollection(@PathVariable Long id, @RequestBody HomeCategoryCollection item) {
+        if (item.getImageUrl() != null && storageService.isBase64Image(item.getImageUrl())) {
+            try {
+                item.setImageUrl(storageService.uploadBase64(item.getImageUrl(), "collections", String.valueOf(id)));
+            } catch (Exception e) {
+                log.warn("Could not auto-upload collection image to R2: {}", e.getMessage());
+            }
+        }
         item.setId(id);
         return ResponseEntity.ok(homeCategoryCollectionRepository.save(item));
     }

@@ -20,6 +20,9 @@ public class Sede {
     private String schedule;
     @Column(columnDefinition = "TEXT")
     private String image;
+
+    @Column(name = "image_url", columnDefinition = "TEXT")
+    private String imageUrl;
     
     @Column(columnDefinition = "TEXT")
     private String description;
@@ -30,5 +33,12 @@ public class Sede {
     @PrePersist
     protected void onCreate() {
         createdAt = LocalDateTime.now();
+    }
+
+    public String getEffectiveImageUrl() {
+        if (imageUrl != null && !imageUrl.trim().isEmpty()) {
+            return imageUrl;
+        }
+        return image;
     }
 }

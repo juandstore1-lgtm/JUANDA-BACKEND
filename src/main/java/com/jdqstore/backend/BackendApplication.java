@@ -20,33 +20,32 @@ public class BackendApplication {
     @Bean
     public CommandLineRunner databaseMigrationRunner(JdbcTemplate jdbcTemplate) {
         return args -> {
-            try {
-                logger.info("Running automatic database migrations for image_url columns...");
-                jdbcTemplate.execute("ALTER TABLE product_images ALTER COLUMN image_url TYPE TEXT;");
-                logger.info("Migrated product_images.image_url to TEXT");
-            } catch (Exception e) {
-                logger.warn("Could not migrate product_images: {}", e.getMessage());
-            }
+            logger.info("Verificando y aplicando migraciones de base de datos para Cloudflare R2...");
 
-            try {
-                jdbcTemplate.execute("ALTER TABLE galleries ALTER COLUMN image_url TYPE TEXT;");
-                logger.info("Migrated galleries.image_url to TEXT");
-            } catch (Exception e) {
-                logger.warn("Could not migrate galleries: {}", e.getMessage());
-            }
-            try {
-                jdbcTemplate.execute("ALTER TABLE raffles ALTER COLUMN image_url TYPE TEXT;");
-                System.out.println("Migración exitosa: raffles.image_url a TEXT");
-            } catch (Exception e) {
-                System.out.println("No se pudo migrar raffles o ya es TEXT: " + e.getMessage());
-            }
+            String[] ddlStatements = {
+                "ALTER TABLE product_images ALTER COLUMN image_url TYPE TEXT;",
+                "ALTER TABLE product_images ADD COLUMN IF NOT EXISTS legacy_base64 TEXT;",
+                "ALTER TABLE categories ADD COLUMN IF NOT EXISTS image_url TEXT;",
+                "ALTER TABLE categories ADD COLUMN IF NOT EXISTS legacy_base64 TEXT;",
+                "ALTER TABLE sedes ADD COLUMN IF NOT EXISTS image_url TEXT;",
+                "ALTER TABLE sedes ADD COLUMN IF NOT EXISTS legacy_base64 TEXT;",
+                "ALTER TABLE raffles ALTER COLUMN image_url TYPE TEXT;",
+                "ALTER TABLE raffles ADD COLUMN IF NOT EXISTS legacy_base64 TEXT;",
+                "ALTER TABLE hero_slides ADD COLUMN IF NOT EXISTS legacy_base64 TEXT;",
+                "ALTER TABLE home_category_collections ADD COLUMN IF NOT EXISTS legacy_base64 TEXT;",
+                "ALTER TABLE contests ADD COLUMN IF NOT EXISTS legacy_base64 TEXT;",
+                "ALTER TABLE contest_participants ADD COLUMN IF NOT EXISTS legacy_base64 TEXT;",
+                "ALTER TABLE outfit_settings ADD COLUMN IF NOT EXISTS legacy_base64 TEXT;"
+            };
 
-            try {
-                jdbcTemplate.execute("ALTER TABLE sedes ALTER COLUMN image TYPE TEXT;");
-                System.out.println("Migración exitosa: sedes.image a TEXT");
-            } catch (Exception e) {
-                System.out.println("No se pudo migrar sedes o ya es TEXT: " + e.getMessage());
+            for (String sql : ddlStatements) {
+                try {
+                    jdbcTemplate.execute(sql);
+                } catch (Exception e) {
+                    logger.debug("DDL ignorado o ya aplicado: {} ({})", sql, e.getMessage());
+                }
             }
+            logger.info("Migraciones de esquema completadas exitosamente.");
         };
     }
 }

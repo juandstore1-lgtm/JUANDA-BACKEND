@@ -55,6 +55,9 @@ public class SecurityConfig {
             .authorizeHttpRequests(auth -> auth
                 // Matriz de permisos (el orden importa: gana la primera regla que coincide)
                 .requestMatchers(HttpMethod.POST, "/api/auth/login").permitAll()
+                .requestMatchers("/api/storage/public/**").permitAll()
+                .requestMatchers("/api/storage/**").hasAnyRole(GLOBAL_ADMIN, STORE_ADMIN)
+                .requestMatchers("/api/admin/migration/**").hasRole(GLOBAL_ADMIN)
                 .requestMatchers("/api/contests/public/**").permitAll()
                 .requestMatchers("/api/contests/admin/**").hasRole(GLOBAL_ADMIN)
                 // Rifas: lectura pública (boletos sin datos del comprador); detalle de compradores y gestión solo GLOBAL_ADMIN
