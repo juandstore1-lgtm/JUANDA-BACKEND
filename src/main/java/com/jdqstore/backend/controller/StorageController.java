@@ -1,5 +1,6 @@
 package com.jdqstore.backend.controller;
 
+import com.jdqstore.backend.audit.Auditable;
 import com.jdqstore.backend.config.R2StorageProperties;
 import com.jdqstore.backend.dto.PresignedUrlRequest;
 import com.jdqstore.backend.dto.PresignedUrlResponse;
@@ -23,6 +24,7 @@ public class StorageController {
     private final R2StorageProperties properties;
 
     @PostMapping("/presigned-url")
+    @Auditable(action = "CREATE", entity = "STORAGE")
     public ResponseEntity<PresignedUrlResponse> generatePresignedUrl(@Valid @RequestBody PresignedUrlRequest request) {
         return ResponseEntity.ok(storageService.generatePresignedUploadUrl(request));
     }
@@ -38,6 +40,7 @@ public class StorageController {
     }
 
     @PostMapping("/upload-base64")
+    @Auditable(action = "CREATE", entity = "STORAGE")
     public ResponseEntity<Map<String, String>> uploadBase64Direct(@RequestBody Map<String, String> payload) {
         String base64Data = payload.get("data");
         String entity = payload.getOrDefault("entity", "general");

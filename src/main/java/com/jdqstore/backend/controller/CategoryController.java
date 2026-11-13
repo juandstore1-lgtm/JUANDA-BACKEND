@@ -1,10 +1,13 @@
 package com.jdqstore.backend.controller;
+
+import com.jdqstore.backend.audit.Auditable;
 import com.jdqstore.backend.dto.CategoryDTO;
 import com.jdqstore.backend.security.SedeAccessService;
 import com.jdqstore.backend.service.CategoryService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+
 import java.util.List;
 
 @RestController
@@ -27,18 +30,21 @@ public class CategoryController {
     }
 
     @PostMapping
+    @Auditable(action = "CREATE", entity = "CATEGORY")
     public ResponseEntity<CategoryDTO> create(@RequestBody CategoryDTO dto) {
         sedeAccess.checkCategoryCreate(dto.getStoreId());
         return ResponseEntity.ok(service.create(dto));
     }
 
     @PutMapping("/{id}")
+    @Auditable(action = "UPDATE", entity = "CATEGORY")
     public ResponseEntity<CategoryDTO> update(@PathVariable Long id, @RequestBody CategoryDTO dto) {
         sedeAccess.checkCategoryUpdate(id, dto.getStoreId());
         return ResponseEntity.ok(service.update(id, dto));
     }
 
     @DeleteMapping("/{id}")
+    @Auditable(action = "DELETE", entity = "CATEGORY")
     public ResponseEntity<Void> delete(@PathVariable Long id) {
         sedeAccess.checkCategoryDelete(id);
         service.delete(id);

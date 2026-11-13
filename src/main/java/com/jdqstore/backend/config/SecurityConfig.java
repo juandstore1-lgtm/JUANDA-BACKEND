@@ -26,7 +26,6 @@ import org.springframework.web.filter.CorsFilter;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
-import java.util.Arrays;
 
 @Configuration
 @EnableWebSecurity
@@ -58,6 +57,7 @@ public class SecurityConfig {
                 .requestMatchers("/api/storage/public/**").permitAll()
                 .requestMatchers("/api/storage/**").hasAnyRole(GLOBAL_ADMIN, STORE_ADMIN)
                 .requestMatchers("/api/admin/migration/**").hasRole(GLOBAL_ADMIN)
+                .requestMatchers("/api/admin/audit-logs/**").hasRole(GLOBAL_ADMIN)
                 .requestMatchers("/api/contests/public/**").permitAll()
                 .requestMatchers("/api/contests/admin/**").hasRole(GLOBAL_ADMIN)
                 // Rifas: lectura pública (boletos sin datos del comprador); detalle de compradores y gestión solo GLOBAL_ADMIN
@@ -103,8 +103,6 @@ public class SecurityConfig {
     public CorsFilter corsFilter() {
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         CorsConfiguration config = new CorsConfiguration();
-        // El frontend se autentica con la cabecera Authorization, no con cookies: no hace falta permitir credenciales
-        // a cualquier origen
         config.setAllowCredentials(false);
         config.addAllowedOriginPattern("*");
         config.addAllowedHeader("*");
