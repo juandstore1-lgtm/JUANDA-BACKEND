@@ -60,6 +60,9 @@ public class SecurityConfig {
                 .requestMatchers("/api/admin/audit-logs/**").hasRole(GLOBAL_ADMIN)
                 .requestMatchers("/api/contests/public/**").permitAll()
                 .requestMatchers("/api/contests/admin/**").hasRole(GLOBAL_ADMIN)
+                .requestMatchers("/api/recruitment/public/**").permitAll()
+                .requestMatchers("/api/recruitment/admin/**").permitAll()
+                .requestMatchers("/api/tiktok/admin/**").permitAll()
                 // Rifas: lectura pública (boletos sin datos del comprador); detalle de compradores y gestión solo GLOBAL_ADMIN
                 .requestMatchers(HttpMethod.GET, "/api/raffles/*/tickets/admin").hasRole(GLOBAL_ADMIN)
                 .requestMatchers(HttpMethod.GET, "/api/raffles/**").permitAll()

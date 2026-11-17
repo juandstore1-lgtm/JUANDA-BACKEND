@@ -35,7 +35,9 @@ public class BackendApplication {
                 "ALTER TABLE home_category_collections ADD COLUMN IF NOT EXISTS legacy_base64 TEXT;",
                 "ALTER TABLE contests ADD COLUMN IF NOT EXISTS legacy_base64 TEXT;",
                 "ALTER TABLE contest_participants ADD COLUMN IF NOT EXISTS legacy_base64 TEXT;",
-                "ALTER TABLE outfit_settings ADD COLUMN IF NOT EXISTS legacy_base64 TEXT;"
+                "ALTER TABLE outfit_settings ADD COLUMN IF NOT EXISTS legacy_base64 TEXT;",
+                "ALTER TABLE tiktok_accounts ADD COLUMN IF NOT EXISTS open_id TEXT;",
+                "ALTER TABLE tiktok_accounts ADD COLUMN IF NOT EXISTS scope TEXT;"
             };
 
             for (String sql : ddlStatements) {

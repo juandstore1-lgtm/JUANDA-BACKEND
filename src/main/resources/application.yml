@@ -14,7 +14,7 @@ spring:
     driver-class-name: org.postgresql.Driver
   jpa:
     hibernate:
-      ddl-auto: ${DDL_AUTO:update}
+      ddl-auto: ${DDL_AUTO:none}
     # El log de SQL solo se activa con el perfil "dev" (application-dev.yml)
     show-sql: false
     properties:
@@ -36,5 +36,10 @@ cloudflare:
     bucket-name: ${R2_BUCKET_NAME:juandstore}
     public-url-base: ${R2_PUBLIC_URL_BASE:https://pub-63cfe435c9854d2e85c789dd3e2f6e52.r2.dev}
     presigned-url-expiration-minutes: ${R2_PRESIGNED_EXPIRATION_MINUTES:15}
+
+tiktok:
+  client-key: ${TIKTOK_CLIENT_KEY:}
+  client-secret: ${TIKTOK_CLIENT_SECRET:}
+  redirect-uri: ${TIKTOK_REDIRECT_URI:http://localhost:3000/admin/tiktok/callback}
 
 

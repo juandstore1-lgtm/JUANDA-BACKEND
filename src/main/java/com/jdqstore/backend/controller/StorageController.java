@@ -31,12 +31,23 @@ public class StorageController {
 
     @PostMapping("/public/presigned-url")
     public ResponseEntity<PresignedUrlResponse> generatePublicPresignedUrl(@Valid @RequestBody PresignedUrlRequest request) {
-        // Only allow participant or contest uploads via public endpoint
+        // Allow participant, contest, or resume uploads via public endpoint
         String entity = request.getEntity() != null ? request.getEntity().toLowerCase().trim() : "";
-        if (!"participants".equals(entity) && !"contests".equals(entity)) {
+        if (!"participants".equals(entity) && !"contests".equals(entity) && !"resumes".equals(entity) && !"recruitment".equals(entity)) {
             return ResponseEntity.badRequest().build();
         }
         return ResponseEntity.ok(storageService.generatePresignedUploadUrl(request));
+    }
+
+    @PostMapping("/public/upload-resume-base64")
+    public ResponseEntity<Map<String, String>> uploadResumeBase64(@RequestBody Map<String, String> payload) {
+        String base64Data = payload.get("data");
+        String originalName = payload.getOrDefault("name", "hoja_de_vida.pdf");
+        if (base64Data == null || base64Data.trim().isEmpty()) {
+            return ResponseEntity.badRequest().body(Map.of("error", "data (base64) es requerido"));
+        }
+        String publicUrl = storageService.uploadBase64(base64Data, "resumes", null);
+        return ResponseEntity.ok(Map.of("publicUrl", publicUrl, "originalName", originalName));
     }
 
     @PostMapping("/upload-base64")

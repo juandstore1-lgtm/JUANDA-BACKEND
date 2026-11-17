@@ -26,12 +26,12 @@ import java.util.regex.Pattern;
 public class R2StorageService {
 
     private static final String CACHE_CONTROL_IMMUTABLE = "public, max-age=31536000, immutable";
-    private static final Pattern BASE64_PATTERN = Pattern.compile("^data:(image/[a-zA-Z0-9.+]+);base64,(.+)$", Pattern.DOTALL);
+    private static final Pattern BASE64_PATTERN = Pattern.compile("^data:([a-zA-Z0-9.+/-]+);base64,(.+)$", Pattern.DOTALL);
 
     private static final Set<String> ALLOWED_ENTITIES = Set.of(
             "products", "categories", "sedes", "raffles",
             "contests", "participants", "hero-slides", "collections",
-            "outfits", "general"
+            "outfits", "general", "resumes", "recruitment"
     );
 
     private static final Map<String, String> MIME_TO_EXTENSION = Map.of(
@@ -40,7 +40,8 @@ public class R2StorageService {
             "image/png", "png",
             "image/webp", "webp",
             "image/gif", "gif",
-            "image/svg+xml", "svg"
+            "image/svg+xml", "svg",
+            "application/pdf", "pdf"
     );
 
     private final S3Client s3Client;
