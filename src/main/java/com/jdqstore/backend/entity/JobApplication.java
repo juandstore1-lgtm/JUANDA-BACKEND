@@ -46,6 +46,11 @@ public class JobApplication {
 
     private String facebook;
 
+    // Contacto de emergencia
+    private String emergencyContactName;
+
+    private String emergencyContactPhone;
+
     // Step 2: Experiencia y formación
     private String targetPosition;
 
@@ -84,6 +89,15 @@ public class JobApplication {
 
     private String salesGoalsAchieved;
 
+    private String howDidYouHear; // "Instagram", "TikTok", "Facebook", "Recomendación / Amigo", "Tienda física", "Página web", "Otro"
+
+    private Boolean hasMedicalCondition; // true / false
+
+    @Column(columnDefinition = "TEXT")
+    private String medicalConditionDetails;
+
+    private Boolean inOtherSelectionProcesses; // true / false
+
     @Column(columnDefinition = "TEXT")
     private String additionalObservations;
 
@@ -108,12 +122,20 @@ public class JobApplication {
 
     private String resumeOriginalName;
 
+    // Documento de identidad
+    @Column(columnDefinition = "TEXT")
+    private String documentFileUrl;
+
+    private String documentFileOriginalName;
+
     // Step 6: Autorizaciones legales
     private Boolean dataPolicyAccepted;
 
     private Boolean infoVerificationAccepted;
 
     private Boolean creditCheckAccepted;
+
+    private Boolean imageAuthorizationAccepted; // Uso de imagen para TikTok, grabaciones y redes comerciales
 
     // Historial, notas internas y proceso de selección
     private Integer score; // Puntaje 0 a 100

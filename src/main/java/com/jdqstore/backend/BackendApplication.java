@@ -37,7 +37,17 @@ public class BackendApplication {
                 "ALTER TABLE contest_participants ADD COLUMN IF NOT EXISTS legacy_base64 TEXT;",
                 "ALTER TABLE outfit_settings ADD COLUMN IF NOT EXISTS legacy_base64 TEXT;",
                 "ALTER TABLE tiktok_accounts ADD COLUMN IF NOT EXISTS open_id TEXT;",
-                "ALTER TABLE tiktok_accounts ADD COLUMN IF NOT EXISTS scope TEXT;"
+                "ALTER TABLE tiktok_accounts ADD COLUMN IF NOT EXISTS scope TEXT;",
+                "ALTER TABLE job_vacancies ADD COLUMN IF NOT EXISTS saturday_hours VARCHAR(255);",
+                "ALTER TABLE job_applications ADD COLUMN IF NOT EXISTS emergency_contact_name VARCHAR(255);",
+                "ALTER TABLE job_applications ADD COLUMN IF NOT EXISTS emergency_contact_phone VARCHAR(255);",
+                "ALTER TABLE job_applications ADD COLUMN IF NOT EXISTS how_did_you_hear VARCHAR(255);",
+                "ALTER TABLE job_applications ADD COLUMN IF NOT EXISTS has_medical_condition BOOLEAN;",
+                "ALTER TABLE job_applications ADD COLUMN IF NOT EXISTS medical_condition_details TEXT;",
+                "ALTER TABLE job_applications ADD COLUMN IF NOT EXISTS in_other_selection_processes BOOLEAN;",
+                "ALTER TABLE job_applications ADD COLUMN IF NOT EXISTS image_authorization_accepted BOOLEAN;",
+                "ALTER TABLE job_applications ADD COLUMN IF NOT EXISTS document_file_url TEXT;",
+                "ALTER TABLE job_applications ADD COLUMN IF NOT EXISTS document_file_original_name VARCHAR(255);"
             };
 
             for (String sql : ddlStatements) {

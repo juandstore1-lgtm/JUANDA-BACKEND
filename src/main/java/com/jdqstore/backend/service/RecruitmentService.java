@@ -111,12 +111,17 @@ public class RecruitmentService {
     public List<JobVacancy> getAllVacanciesAdmin(String sede, String status, String search) {
         List<JobVacancy> list = vacancyRepository.findAllByOrderByCreatedAtDesc();
         return list.stream()
-                .filter(v -> sede == null || sede.isEmpty() || "TODAS".equalsIgnoreCase(sede) || v.getSede().equalsIgnoreCase(sede))
-                .filter(v -> status == null || status.isEmpty() || "TODOS".equalsIgnoreCase(status) || v.getStatus().equalsIgnoreCase(status))
-                .filter(v -> search == null || search.isEmpty()
-                        || v.getTitle().toLowerCase().contains(search.toLowerCase())
-                        || v.getPosition().toLowerCase().contains(search.toLowerCase())
-                        || v.getSede().toLowerCase().contains(search.toLowerCase()))
+                .filter(v -> sede == null || sede.isEmpty() || "TODAS".equalsIgnoreCase(sede) 
+                        || (v.getSede() != null && v.getSede().equalsIgnoreCase(sede)))
+                .filter(v -> status == null || status.isEmpty() || "TODOS".equalsIgnoreCase(status) 
+                        || (v.getStatus() != null && v.getStatus().equalsIgnoreCase(status)))
+                .filter(v -> {
+                    if (search == null || search.trim().isEmpty()) return true;
+                    String s = search.toLowerCase();
+                    return (v.getTitle() != null && v.getTitle().toLowerCase().contains(s))
+                            || (v.getPosition() != null && v.getPosition().toLowerCase().contains(s))
+                            || (v.getSede() != null && v.getSede().toLowerCase().contains(s));
+                })
                 .collect(Collectors.toList());
     }
 
@@ -143,6 +148,7 @@ public class RecruitmentService {
         existing.setDescription(updated.getDescription());
         existing.setWorkScheduleType(updated.getWorkScheduleType());
         existing.setWorkScheduleHours(updated.getWorkScheduleHours());
+        existing.setSaturdayHours(updated.getSaturdayHours());
         existing.setWorkDays(updated.getWorkDays());
         existing.setSundayPolicy(updated.getSundayPolicy());
         existing.setSundayHours(updated.getSundayHours());
@@ -200,11 +206,16 @@ public class RecruitmentService {
                 : applicationRepository.findAllByOrderByCreatedAtDesc();
 
         return list.stream()
-                .filter(a -> status == null || status.isEmpty() || "TODOS".equalsIgnoreCase(status) || a.getStatus().equalsIgnoreCase(status))
-                .filter(a -> search == null || search.isEmpty()
-                        || a.getFullName().toLowerCase().contains(search.toLowerCase())
-                        || (a.getDocumentNumber() != null && a.getDocumentNumber().contains(search))
-                        || (a.getEmail() != null && a.getEmail().toLowerCase().contains(search.toLowerCase())))
+                .filter(a -> status == null || status.isEmpty() || "TODOS".equalsIgnoreCase(status) 
+                        || (a.getStatus() != null && a.getStatus().equalsIgnoreCase(status)))
+                .filter(a -> {
+                    if (search == null || search.trim().isEmpty()) return true;
+                    String s = search.toLowerCase();
+                    return (a.getFullName() != null && a.getFullName().toLowerCase().contains(s))
+                            || (a.getDocumentNumber() != null && a.getDocumentNumber().contains(s))
+                            || (a.getEmail() != null && a.getEmail().toLowerCase().contains(s))
+                            || (a.getTargetPosition() != null && a.getTargetPosition().toLowerCase().contains(s));
+                })
                 .collect(Collectors.toList());
     }
 

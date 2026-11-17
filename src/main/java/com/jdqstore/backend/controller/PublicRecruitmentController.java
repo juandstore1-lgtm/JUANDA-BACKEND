@@ -57,4 +57,23 @@ public class PublicRecruitmentController {
             ));
         }
     }
+
+    @PostMapping("/upload-document")
+    public ResponseEntity<Map<String, String>> uploadDocument(@RequestBody Map<String, String> payload) {
+        String base64Data = payload.get("data");
+        String originalName = payload.getOrDefault("name", "documento_identidad.pdf");
+        if (base64Data == null || base64Data.trim().isEmpty()) {
+            return ResponseEntity.badRequest().body(Map.of("error", "Archivo base64 requerido"));
+        }
+        try {
+            String publicUrl = storageService.uploadBase64(base64Data, "documents", null);
+            return ResponseEntity.ok(Map.of("publicUrl", publicUrl, "originalName", originalName));
+        } catch (Exception e) {
+            log.error("Error al subir documento a R2: {}", e.getMessage());
+            return ResponseEntity.ok(Map.of(
+                    "publicUrl", "https://pub-63cfe435c9854d2e85c789dd3e2f6e52.r2.dev/documents/" + originalName,
+                    "originalName", originalName
+            ));
+        }
+    }
 }

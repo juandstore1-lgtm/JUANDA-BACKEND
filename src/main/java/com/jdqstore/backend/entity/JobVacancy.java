@@ -34,7 +34,9 @@ public class JobVacancy {
     // Horarios y descansos
     private String workScheduleType; // "Tiempo completo", "Medio tiempo", "Por turnos"
 
-    private String workScheduleHours; // "10:00 a. m. - 8:00 p. m."
+    private String workScheduleHours; // "10:00 a. m. - 8:00 p. m." (Lunes a viernes)
+
+    private String saturdayHours; // "10:00 a. m. - 8:00 p. m." (Sábados)
 
     private String workDays; // "Lun,Mar,Mié,Jue,Vie,Sáb"
 
