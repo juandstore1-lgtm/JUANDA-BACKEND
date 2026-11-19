@@ -2,20 +2,29 @@ package com.jdqstore.backend.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.jdqstore.backend.entity.*;
 import com.jdqstore.backend.repository.*;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.multipart.MultipartFile;
 
+import java.io.File;
+import java.io.IOException;
 import java.net.URI;
 import java.net.URLEncoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.nio.file.StandardCopyOption;
 import java.time.*;
 import java.time.temporal.TemporalAdjusters;
 import java.util.*;
@@ -30,54 +39,102 @@ public class TikTokService {
     private final TikTokVideoRepository videoRepository;
     private final TikTokScheduledVideoRepository scheduledVideoRepository;
     private final TikTokDayNoteRepository dayNoteRepository;
+    private final TikTokSettingsRepository settingsRepository;
     private final SedeRepository sedeRepository;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     @Value("${tiktok.client-key:}")
-    private String clientKey;
+    private String defaultClientKey;
 
     @Value("${tiktok.client-secret:}")
-    private String clientSecret;
+    private String defaultClientSecret;
 
-    @Value("${tiktok.redirect-uri:http://localhost:3000/admin/tiktok/callback}")
-    private String redirectUri;
+    @Value("${tiktok.redirect-uri:https://www.juandstore.com/admin/tiktok/callback}")
+    private String defaultRedirectUri;
 
-    // --- Configuración y URL de OAuth 2.0 Oficial ---
+    private static final String UPLOAD_DIR = "uploads/tiktok_videos";
+
+    // --- Resolución dinámica de credenciales (Base de datos o application.yml) ---
+
+    public String getEffectiveClientKey() {
+        Optional<TikTokSettings> opt = settingsRepository.findById(1L);
+        if (opt.isPresent() && opt.get().getClientKey() != null && !opt.get().getClientKey().trim().isEmpty()) {
+            return opt.get().getClientKey().trim();
+        }
+        return defaultClientKey != null ? defaultClientKey.trim() : "";
+    }
+
+    public String getEffectiveClientSecret() {
+        Optional<TikTokSettings> opt = settingsRepository.findById(1L);
+        if (opt.isPresent() && opt.get().getClientSecret() != null && !opt.get().getClientSecret().trim().isEmpty()) {
+            return opt.get().getClientSecret().trim();
+        }
+        return defaultClientSecret != null ? defaultClientSecret.trim() : "";
+    }
+
+    public String getEffectiveRedirectUri() {
+        Optional<TikTokSettings> opt = settingsRepository.findById(1L);
+        if (opt.isPresent() && opt.get().getRedirectUri() != null && !opt.get().getRedirectUri().trim().isEmpty()) {
+            return opt.get().getRedirectUri().trim();
+        }
+        return defaultRedirectUri != null ? defaultRedirectUri.trim() : "https://www.juandstore.com/admin/tiktok/callback";
+    }
 
     public Map<String, Object> getOAuthConfig() {
-        boolean configured = clientKey != null && !clientKey.trim().isEmpty() &&
-                clientSecret != null && !clientSecret.trim().isEmpty();
+        String clientKey = getEffectiveClientKey();
+        String clientSecret = getEffectiveClientSecret();
+        String redirectUri = getEffectiveRedirectUri();
+        boolean configured = !clientKey.isEmpty() && !clientSecret.isEmpty();
 
         Map<String, Object> res = new HashMap<>();
         res.put("configured", configured);
-        res.put("clientKey", (clientKey != null && !clientKey.trim().isEmpty()) ? clientKey.trim() : null);
+        res.put("clientKey", !clientKey.isEmpty() ? clientKey : null);
         res.put("redirectUri", redirectUri);
-        res.put("scopes", List.of("user.info.basic", "user.info.profile", "video.list"));
+        res.put("scopes", List.of("user.info.basic", "video.list", "video.publish", "video.upload"));
         res.put("requiredCredentials", Map.of(
-                "TIKTOK_CLIENT_KEY", "Client Key (App ID) obtenido en developers.tiktok.com",
-                "TIKTOK_CLIENT_SECRET", "Client Secret de tu App de TikTok Developers",
+                "TIKTOK_CLIENT_KEY", "Client Key (App ID) de tu app en developers.tiktok.com",
+                "TIKTOK_CLIENT_SECRET", "Client Secret de tu app en developers.tiktok.com",
                 "TIKTOK_REDIRECT_URI", redirectUri + " (Registrada en Redirect URIs de tu app)"
         ));
         return res;
     }
 
+    @Transactional
+    public Map<String, Object> saveOAuthConfig(Map<String, String> body) {
+        String clientKey = body.get("clientKey");
+        String clientSecret = body.get("clientSecret");
+        String redirectUri = body.get("redirectUri");
+
+        TikTokSettings settings = settingsRepository.findById(1L).orElse(TikTokSettings.builder().id(1L).build());
+        if (clientKey != null) settings.setClientKey(clientKey.trim());
+        if (clientSecret != null) settings.setClientSecret(clientSecret.trim());
+        if (redirectUri != null && !redirectUri.trim().isEmpty()) settings.setRedirectUri(redirectUri.trim());
+
+        settingsRepository.save(settings);
+        log.info("Configuración de credenciales de TikTok actualizada exitosamente en base de datos.");
+        return getOAuthConfig();
+    }
+
+    // --- Generación de URL OAuth 2.0 Oficial ---
+
     public String getAuthorizationUrl(String sedeName) {
-        String cleanKey = (clientKey != null) ? clientKey.trim() : "";
-        if (cleanKey.isEmpty()) {
-            throw new IllegalStateException("TIKTOK_CLIENT_KEY no está configurado en las variables del servidor. Configura tus credenciales de TikTok Developers.");
+        String clientKey = getEffectiveClientKey();
+        String redirectUri = getEffectiveRedirectUri();
+
+        if (clientKey.isEmpty()) {
+            throw new IllegalStateException("TIKTOK_CLIENT_KEY no está configurado. Configura tus credenciales de TikTok Developers.");
         }
 
-        String safeSede = (sedeName != null && !sedeName.trim().isEmpty()) ? sedeName.trim() : "TODAS";
-        String encodedRedirect = URLEncoder.encode(redirectUri.trim(), StandardCharsets.UTF_8);
-        String encodedState = URLEncoder.encode(safeSede, StandardCharsets.UTF_8);
-        String scopes = "user.info.basic,user.info.profile,video.list";
+        String encodedRedirect = URLEncoder.encode(redirectUri, StandardCharsets.UTF_8);
+        String state = "GLOBAL";
+        String scopes = "user.info.basic,video.list,video.publish,video.upload";
 
         return "https://www.tiktok.com/v2/auth/authorize/?"
-                + "client_key=" + cleanKey
+                + "client_key=" + clientKey
                 + "&response_type=code"
                 + "&scope=" + scopes
                 + "&redirect_uri=" + encodedRedirect
-                + "&state=" + encodedState;
+                + "&state=" + state;
     }
 
     // --- Intercambio de Código OAuth 2.0 por Token ---
@@ -87,29 +144,32 @@ public class TikTokService {
         if (code == null || code.trim().isEmpty()) {
             throw new IllegalArgumentException("El código de autorización de TikTok es requerido.");
         }
-        if (clientKey == null || clientKey.trim().isEmpty() || clientSecret == null || clientSecret.trim().isEmpty()) {
+
+        String clientKey = getEffectiveClientKey();
+        String clientSecret = getEffectiveClientSecret();
+        String redirectUri = getEffectiveRedirectUri();
+
+        if (clientKey.isEmpty() || clientSecret.isEmpty()) {
             throw new IllegalStateException("Las credenciales TIKTOK_CLIENT_KEY o TIKTOK_CLIENT_SECRET no están configuradas.");
         }
 
-        String safeSede = (sedeName != null && !sedeName.trim().isEmpty()) ? sedeName.trim() : "Villa Colombia";
-
         try {
             HttpClient client = HttpClient.newBuilder()
-                    .connectTimeout(Duration.ofSeconds(10))
+                    .connectTimeout(Duration.ofSeconds(15))
                     .build();
 
             // 1. Solicitar tokens a TikTok
-            String formBody = "client_key=" + URLEncoder.encode(clientKey.trim(), StandardCharsets.UTF_8)
-                    + "&client_secret=" + URLEncoder.encode(clientSecret.trim(), StandardCharsets.UTF_8)
+            String formBody = "client_key=" + URLEncoder.encode(clientKey, StandardCharsets.UTF_8)
+                    + "&client_secret=" + URLEncoder.encode(clientSecret, StandardCharsets.UTF_8)
                     + "&code=" + URLEncoder.encode(code.trim(), StandardCharsets.UTF_8)
                     + "&grant_type=authorization_code"
-                    + "&redirect_uri=" + URLEncoder.encode(redirectUri.trim(), StandardCharsets.UTF_8);
+                    + "&redirect_uri=" + URLEncoder.encode(redirectUri, StandardCharsets.UTF_8);
 
             HttpRequest tokenRequest = HttpRequest.newBuilder()
                     .uri(URI.create("https://open.tiktokapis.com/v2/oauth/token/"))
                     .header("Content-Type", "application/x-www-form-urlencoded")
                     .header("Cache-Control", "no-cache")
-                    .timeout(Duration.ofSeconds(10))
+                    .timeout(Duration.ofSeconds(15))
                     .POST(HttpRequest.BodyPublishers.ofString(formBody))
                     .build();
 
@@ -121,29 +181,34 @@ public class TikTokService {
             }
 
             JsonNode tokenJson = objectMapper.readTree(tokenResponse.body());
-            if (tokenJson.has("error") && !tokenJson.get("error").has("code") || (tokenJson.has("error") && !"ok".equalsIgnoreCase(tokenJson.get("error").path("code").asText()))) {
-                String errMsg = tokenJson.path("error").path("message").asText("Error desconocido al autorizar en TikTok");
-                throw new IllegalArgumentException("TikTok devolvió un error: " + errMsg);
+            if (tokenJson.has("error") && !tokenJson.get("error").isMissingNode()) {
+                JsonNode errNode = tokenJson.get("error");
+                String codeStr = errNode.path("code").asText("");
+                if (!codeStr.isEmpty() && !"ok".equalsIgnoreCase(codeStr)) {
+                    String errMsg = errNode.path("message").asText("Error devuelto por TikTok");
+                    throw new IllegalArgumentException("TikTok devolvió un error (" + codeStr + "): " + errMsg);
+                }
             }
 
             JsonNode dataNode = tokenJson.path("data");
             String accessToken = dataNode.path("access_token").asText();
             String refreshToken = dataNode.path("refresh_token").asText();
             long expiresIn = dataNode.path("expires_in").asLong(86400L);
+            long refreshExpiresIn = dataNode.path("refresh_expires_in").asLong(31536000L);
             String openId = dataNode.path("open_id").asText();
-            String scope = dataNode.path("scope").asText("user.info.basic,video.list");
+            String scope = dataNode.path("scope").asText("user.info.basic,video.list,video.publish,video.upload");
 
             // 2. Consultar perfil con el access token
             HttpRequest userRequest = HttpRequest.newBuilder()
-                    .uri(URI.create("https://open.tiktokapis.com/v2/user/info/?fields=open_id,union_id,avatar_url,display_name,username"))
+                    .uri(URI.create("https://open.tiktokapis.com/v2/user/info/?fields=open_id,union_id,avatar_url,avatar_url_100,display_name,username"))
                     .header("Authorization", "Bearer " + accessToken)
-                    .timeout(Duration.ofSeconds(10))
+                    .timeout(Duration.ofSeconds(15))
                     .GET()
                     .build();
 
             HttpResponse<String> userResponse = client.send(userRequest, HttpResponse.BodyHandlers.ofString());
-            String username = "@cuenta_tiktok";
-            String displayName = safeSede;
+            String username = "@juandstore";
+            String displayName = "JUANDSTORE";
             String avatarUrl = null;
 
             if (userResponse.statusCode() == 200) {
@@ -156,25 +221,20 @@ public class TikTokService {
                     }
                     displayName = userData.path("display_name").asText(displayName);
                     avatarUrl = userData.path("avatar_url").asText(null);
+                    if (avatarUrl == null || avatarUrl.isEmpty()) {
+                        avatarUrl = userData.path("avatar_url_100").asText(null);
+                    }
                 }
+            } else {
+                log.warn("TikTok User Info devolvió HTTP {}: {}", userResponse.statusCode(), userResponse.body());
             }
 
-            // 3. Buscar sedeId
-            Long sedeId = null;
-            Optional<Sede> sOpt = sedeRepository.findFirstByBarrioIgnoreCase(safeSede);
-            if (!sOpt.isPresent()) {
-                sOpt = sedeRepository.findFirstByNameIgnoreCase(safeSede);
-            }
-            if (sOpt.isPresent()) {
-                sedeId = sOpt.get().getId();
-            }
+            // 3. Crear o actualizar cuenta global
+            TikTokAccount acc = accountRepository.findFirstBySedeNameIgnoreCase("GLOBAL")
+                    .orElse(accountRepository.findByStatus("CONNECTED").stream().findFirst()
+                            .orElse(TikTokAccount.builder().sedeName("GLOBAL").build()));
 
-            // 4. Guardar cuenta en base de datos
-            TikTokAccount acc = accountRepository.findFirstBySedeNameIgnoreCase(safeSede)
-                    .orElse(TikTokAccount.builder().sedeName(safeSede).build());
-
-            acc.setSedeId(sedeId);
-            acc.setSedeName(safeSede);
+            acc.setSedeName("GLOBAL");
             acc.setUsername(username);
             acc.setDisplayName(displayName);
             acc.setAccountId(openId != null && !openId.isEmpty() ? openId : "73" + System.currentTimeMillis());
@@ -186,13 +246,22 @@ public class TikTokService {
             acc.setAccessToken(accessToken);
             acc.setRefreshToken(refreshToken);
             acc.setTokenExpiresAt(LocalDateTime.now().plusSeconds(expiresIn));
+            acc.setRefreshTokenExpiresAt(LocalDateTime.now().plusSeconds(refreshExpiresIn));
             acc.setStatus("CONNECTED");
-            acc.setPermissions("Lectura de perfil y videos públicos");
+
+            // Formatear permisos amigables basados en los scopes reales
+            List<String> permList = new ArrayList<>();
+            permList.add("Perfil (user.info.basic)");
+            if (scope.contains("video.publish")) permList.add("Publicación directa (video.publish)");
+            if (scope.contains("video.upload")) permList.add("Carga de borradores (video.upload)");
+            if (scope.contains("video.list")) permList.add("Lectura de videos (video.list)");
+            acc.setPermissions(String.join(", ", permList));
             acc.setConnectedAt(LocalDateTime.now());
 
             TikTokAccount saved = accountRepository.save(acc);
+            log.info("Cuenta de TikTok {} vinculada exitosamente con scopes: {}", username, scope);
 
-            // 5. Sincronizar videos reales de la cuenta
+            // 4. Sincronizar videos reales de la cuenta
             syncVideosFromTikTok(saved);
 
             return saved;
@@ -201,6 +270,551 @@ public class TikTokService {
         } catch (Exception e) {
             log.error("Excepción al intercambiar código de TikTok OAuth: {}", e.getMessage(), e);
             throw new RuntimeException("Error durante la vinculación OAuth 2.0 con TikTok: " + e.getMessage(), e);
+        }
+    }
+
+    // --- Token Refresh Automático ---
+
+    public String ensureValidAccessToken(TikTokAccount account) {
+        if (account == null || account.getAccessToken() == null) {
+            throw new IllegalStateException("No hay ninguna cuenta de TikTok vinculada.");
+        }
+
+        // Si faltan más de 5 minutos para que expire, el token sigue válido
+        if (account.getTokenExpiresAt() != null && account.getTokenExpiresAt().isAfter(LocalDateTime.now().plusMinutes(5))) {
+            return account.getAccessToken();
+        }
+
+        // Si expiró y tenemos refresh_token, renovarlo
+        if (account.getRefreshToken() != null && !account.getRefreshToken().isEmpty()) {
+            try {
+                String clientKey = getEffectiveClientKey();
+                String clientSecret = getEffectiveClientSecret();
+
+                HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(15)).build();
+                String formBody = "client_key=" + URLEncoder.encode(clientKey, StandardCharsets.UTF_8)
+                        + "&client_secret=" + URLEncoder.encode(clientSecret, StandardCharsets.UTF_8)
+                        + "&grant_type=refresh_token"
+                        + "&refresh_token=" + URLEncoder.encode(account.getRefreshToken(), StandardCharsets.UTF_8);
+
+                HttpRequest request = HttpRequest.newBuilder()
+                        .uri(URI.create("https://open.tiktokapis.com/v2/oauth/token/"))
+                        .header("Content-Type", "application/x-www-form-urlencoded")
+                        .timeout(Duration.ofSeconds(15))
+                        .POST(HttpRequest.BodyPublishers.ofString(formBody))
+                        .build();
+
+                HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+                if (response.statusCode() == 200) {
+                    JsonNode json = objectMapper.readTree(response.body());
+                    JsonNode data = json.path("data");
+                    String newAccess = data.path("access_token").asText();
+                    String newRefresh = data.path("refresh_token").asText();
+                    long expiresIn = data.path("expires_in").asLong(86400L);
+
+                    account.setAccessToken(newAccess);
+                    if (!newRefresh.isEmpty()) account.setRefreshToken(newRefresh);
+                    account.setTokenExpiresAt(LocalDateTime.now().plusSeconds(expiresIn));
+                    accountRepository.save(account);
+                    log.info("Token de TikTok renovado automáticamente para {}", account.getUsername());
+                    return newAccess;
+                } else {
+                    log.warn("Fallo al refrescar token de TikTok HTTP {}: {}", response.statusCode(), response.body());
+                }
+            } catch (Exception e) {
+                log.error("Error al refrescar token de TikTok: {}", e.getMessage());
+            }
+        }
+
+        return account.getAccessToken();
+    }
+
+    // --- Cuenta Global (Administrador Global) ---
+
+    public Map<String, Object> getGlobalAccount() {
+        Optional<TikTokAccount> accOpt = accountRepository.findFirstBySedeNameIgnoreCaseAndStatus("GLOBAL", "CONNECTED");
+        if (!accOpt.isPresent()) {
+            accOpt = accountRepository.findByStatus("CONNECTED").stream().findFirst();
+        }
+
+        Map<String, Object> res = new HashMap<>();
+        if (accOpt.isPresent()) {
+            TikTokAccount acc = accOpt.get();
+            String scope = acc.getScope() != null ? acc.getScope() : "";
+
+            res.put("connected", true);
+            res.put("id", acc.getId());
+            res.put("username", acc.getUsername());
+            res.put("displayName", acc.getDisplayName());
+            res.put("avatarUrl", acc.getAvatarUrl());
+            res.put("accountId", acc.getAccountId());
+            res.put("openId", acc.getOpenId());
+            res.put("status", "Conectada");
+            res.put("connectedAt", acc.getConnectedAt() != null ? acc.getConnectedAt().toString() : LocalDateTime.now().toString());
+            res.put("permissions", acc.getPermissions() != null ? acc.getPermissions() : "Perfil, carga y publicación de videos");
+            res.put("scope", scope);
+            res.put("canPublishDirectly", scope.contains("video.publish"));
+            res.put("canUploadDraft", scope.contains("video.upload"));
+            res.put("canListVideos", scope.contains("video.list"));
+            res.put("tokenExpiresAt", acc.getTokenExpiresAt() != null ? acc.getTokenExpiresAt().toString() : null);
+        } else {
+            res.put("connected", false);
+            res.put("status", "Sin conectar");
+            res.put("username", null);
+            res.put("displayName", null);
+            res.put("avatarUrl", null);
+            res.put("canPublishDirectly", false);
+            res.put("canUploadDraft", false);
+        }
+        return res;
+    }
+
+    @Transactional
+    public void disconnectGlobalAccount() {
+        List<TikTokAccount> accounts = accountRepository.findByStatus("CONNECTED");
+        for (TikTokAccount acc : accounts) {
+            acc.setStatus("DISCONNECTED");
+            acc.setAccessToken(null);
+            acc.setRefreshToken(null);
+            accountRepository.save(acc);
+        }
+        log.info("Cuenta global de TikTok desconectada.");
+    }
+
+    // --- Publicar Video Real (Content Posting API v2) ---
+
+    @Transactional
+    public Map<String, Object> publishVideo(
+            MultipartFile videoFile,
+            String title,
+            String hashtags,
+            String privacyLevel,
+            Boolean allowComments,
+            Boolean allowDuet,
+            Boolean allowStitch,
+            Long coverTimestampMs,
+            Boolean isDraft
+    ) {
+        TikTokAccount account = getConnectedGlobalAccount();
+        String accessToken = ensureValidAccessToken(account);
+
+        if (videoFile == null || videoFile.isEmpty()) {
+            throw new IllegalArgumentException("El archivo de video es obligatorio para publicar.");
+        }
+
+        // 1. Guardar archivo localmente
+        Path savedPath = saveVideoFileLocally(videoFile);
+        File fileOnDisk = savedPath.toFile();
+        long fileSize = fileOnDisk.length();
+
+        if (fileSize <= 0) {
+            throw new IllegalArgumentException("El archivo de video está vacío.");
+        }
+
+        String safePrivacy = (privacyLevel != null && !privacyLevel.trim().isEmpty()) ? privacyLevel.trim() : "PUBLIC_TO_EVERYONE";
+        boolean safeComments = allowComments != null ? allowComments : true;
+        boolean safeDuet = allowDuet != null ? allowDuet : true;
+        boolean safeStitch = allowStitch != null ? allowStitch : true;
+        boolean safeDraft = isDraft != null ? isDraft : false;
+        long safeCoverMs = coverTimestampMs != null ? coverTimestampMs : 1000L;
+
+        String fullCaption = (title != null ? title.trim() : "");
+        if (hashtags != null && !hashtags.trim().isEmpty()) {
+            fullCaption = fullCaption + " " + hashtags.trim();
+        }
+        if (fullCaption.length() > 2200) {
+            fullCaption = fullCaption.substring(0, 2197) + "...";
+        }
+
+        try {
+            HttpClient client = HttpClient.newBuilder()
+                    .connectTimeout(Duration.ofSeconds(30))
+                    .build();
+
+            String publishId = null;
+            String uploadUrl = null;
+
+            if (safeDraft) {
+                // Modo Borrador: Inbox Video Init
+                log.info("Iniciando subida de borrador a TikTok Inbox...");
+                ObjectNode initBody = objectMapper.createObjectNode();
+                ObjectNode sourceInfo = initBody.putObject("source_info");
+                sourceInfo.put("source", "FILE_UPLOAD");
+                sourceInfo.put("video_size", fileSize);
+                sourceInfo.put("chunk_size", fileSize);
+                sourceInfo.put("total_chunk_count", 1);
+
+                HttpRequest initReq = HttpRequest.newBuilder()
+                        .uri(URI.create("https://open.tiktokapis.com/v2/post/publish/inbox/video/init/"))
+                        .header("Authorization", "Bearer " + accessToken)
+                        .header("Content-Type", "application/json; charset=UTF-8")
+                        .timeout(Duration.ofSeconds(30))
+                        .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(initBody)))
+                        .build();
+
+                HttpResponse<String> initRes = client.send(initReq, HttpResponse.BodyHandlers.ofString());
+                JsonNode initJson = objectMapper.readTree(initRes.body());
+
+                validateTikTokApiResponse(initRes.statusCode(), initJson, "video.upload (Borrador)");
+
+                publishId = initJson.path("data").path("publish_id").asText();
+                uploadUrl = initJson.path("data").path("upload_url").asText();
+            } else {
+                // Modo Publicación Directa: Video Publish Init
+                log.info("Iniciando publicación directa en TikTok Content Posting API...");
+                ObjectNode initBody = objectMapper.createObjectNode();
+
+                ObjectNode postInfo = initBody.putObject("post_info");
+                postInfo.put("title", fullCaption);
+                postInfo.put("privacy_level", safePrivacy);
+                postInfo.put("disable_duet", !safeDuet);
+                postInfo.put("disable_comment", !safeComments);
+                postInfo.put("disable_stitch", !safeStitch);
+                postInfo.put("video_cover_timestamp_ms", safeCoverMs);
+
+                ObjectNode sourceInfo = initBody.putObject("source_info");
+                sourceInfo.put("source", "FILE_UPLOAD");
+                sourceInfo.put("video_size", fileSize);
+                sourceInfo.put("chunk_size", fileSize);
+                sourceInfo.put("total_chunk_count", 1);
+
+                HttpRequest initReq = HttpRequest.newBuilder()
+                        .uri(URI.create("https://open.tiktokapis.com/v2/post/publish/video/init/"))
+                        .header("Authorization", "Bearer " + accessToken)
+                        .header("Content-Type", "application/json; charset=UTF-8")
+                        .timeout(Duration.ofSeconds(30))
+                        .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(initBody)))
+                        .build();
+
+                HttpResponse<String> initRes = client.send(initReq, HttpResponse.BodyHandlers.ofString());
+                JsonNode initJson = objectMapper.readTree(initRes.body());
+
+                validateTikTokApiResponse(initRes.statusCode(), initJson, "video.publish (Publicación Directa)");
+
+                publishId = initJson.path("data").path("publish_id").asText();
+                uploadUrl = initJson.path("data").path("upload_url").asText();
+            }
+
+            if (uploadUrl == null || uploadUrl.isEmpty()) {
+                throw new IllegalStateException("TikTok no proporcionó una URL de subida (upload_url).");
+            }
+
+            // 2. Subir binario del video a upload_url con PUT y Content-Range
+            log.info("Subiendo archivo de video ({} bytes) al servidor de TikTok...", fileSize);
+            HttpRequest uploadReq = HttpRequest.newBuilder()
+                    .uri(URI.create(uploadUrl))
+                    .header("Content-Type", "video/mp4")
+                    .header("Content-Range", "bytes 0-" + (fileSize - 1) + "/" + fileSize)
+                    .timeout(Duration.ofMinutes(5))
+                    .PUT(HttpRequest.BodyPublishers.ofFile(savedPath))
+                    .build();
+
+            HttpResponse<String> uploadRes = client.send(uploadReq, HttpResponse.BodyHandlers.ofString());
+            if (uploadRes.statusCode() != 200 && uploadRes.statusCode() != 201 && uploadRes.statusCode() != 204) {
+                log.error("Fallo al subir video a upload_url de TikTok: HTTP {} - {}", uploadRes.statusCode(), uploadRes.body());
+                throw new IllegalArgumentException("Error al transmitir el video a TikTok (HTTP " + uploadRes.statusCode() + "): " + uploadRes.body());
+            }
+
+            log.info("Video subido exitosamente a TikTok. Publish ID: {}", publishId);
+
+            // 3. Consultar estado inmediato
+            String finalStatus = "PROCESSING_UPLOAD";
+            try {
+                Thread.sleep(1500); // Breve espera para que TikTok registre el estado
+                HttpRequest statusReq = HttpRequest.newBuilder()
+                        .uri(URI.create("https://open.tiktokapis.com/v2/post/publish/status/fetch/"))
+                        .header("Authorization", "Bearer " + accessToken)
+                        .header("Content-Type", "application/json")
+                        .timeout(Duration.ofSeconds(15))
+                        .POST(HttpRequest.BodyPublishers.ofString("{\"publish_id\": \"" + publishId + "\"}"))
+                        .build();
+
+                HttpResponse<String> statusRes = client.send(statusReq, HttpResponse.BodyHandlers.ofString());
+                if (statusRes.statusCode() == 200) {
+                    JsonNode sJson = objectMapper.readTree(statusRes.body());
+                    String statusText = sJson.path("data").path("status").asText();
+                    if (!statusText.isEmpty()) {
+                        finalStatus = statusText;
+                    }
+                }
+            } catch (Exception ex) {
+                log.warn("No se pudo verificar el estado preliminar del publish_id {}: {}", publishId, ex.getMessage());
+            }
+
+            // 4. Registrar en la base de datos de publicaciones
+            TikTokVideo newVid = TikTokVideo.builder()
+                    .accountId(account.getId())
+                    .sedeName("GLOBAL")
+                    .videoId(publishId)
+                    .title(title != null && !title.isEmpty() ? title : "Publicación en TikTok")
+                    .description(fullCaption)
+                    .hashtags(hashtags)
+                    .videoUrl(null)
+                    .duration("0:30")
+                    .publishedAt(LocalDateTime.now())
+                    .viewCount(0L)
+                    .likeCount(0L)
+                    .commentCount(0L)
+                    .shareCount(0L)
+                    .contentType("Video")
+                    .build();
+            videoRepository.save(newVid);
+
+            Map<String, Object> result = new HashMap<>();
+            result.put("success", true);
+            result.put("publishId", publishId);
+            result.put("status", finalStatus);
+            result.put("isDraft", safeDraft);
+            result.put("message", safeDraft
+                    ? "Borrador enviado exitosamente a tu cuenta de TikTok. Abre la app de TikTok para finalizar su publicación."
+                    : "¡Video enviado exitosamente a TikTok mediante Content Posting API oficial!");
+            return result;
+
+        } catch (IllegalArgumentException | IllegalStateException e) {
+            throw e;
+        } catch (Exception e) {
+            log.error("Excepción al publicar video en TikTok: {}", e.getMessage(), e);
+            throw new RuntimeException("Error en la integración de TikTok: " + e.getMessage(), e);
+        }
+    }
+
+    // --- Programar Video para Publicación Semanal ---
+
+    @Transactional
+    public TikTokScheduledVideo scheduleVideo(
+            MultipartFile videoFile,
+            String title,
+            String hashtags,
+            String privacyLevel,
+            Boolean allowComments,
+            Boolean allowDuet,
+            Boolean allowStitch,
+            Long coverTimestampMs,
+            LocalDateTime scheduledAt,
+            Boolean isDraft
+    ) {
+        TikTokAccount account = getConnectedGlobalAccount();
+
+        if (videoFile == null || videoFile.isEmpty()) {
+            throw new IllegalArgumentException("El archivo de video es obligatorio para programar.");
+        }
+        if (scheduledAt == null) {
+            throw new IllegalArgumentException("La fecha y hora de programación es requerida.");
+        }
+        if (scheduledAt.isBefore(LocalDateTime.now())) {
+            throw new IllegalArgumentException("La fecha y hora programada debe ser posterior al momento actual.");
+        }
+
+        Path savedPath = saveVideoFileLocally(videoFile);
+
+        TikTokScheduledVideo sched = TikTokScheduledVideo.builder()
+                .accountId(account.getId())
+                .sedeName("GLOBAL")
+                .title(title != null && !title.trim().isEmpty() ? title.trim() : "Video programado")
+                .description(title)
+                .hashtags(hashtags)
+                .videoFilePath(savedPath.toAbsolutePath().toString())
+                .scheduledAt(scheduledAt)
+                .privacyLevel(privacyLevel != null ? privacyLevel : "PUBLIC_TO_EVERYONE")
+                .allowComments(allowComments != null ? allowComments : true)
+                .allowDuet(allowDuet != null ? allowDuet : true)
+                .allowStitch(allowStitch != null ? allowStitch : true)
+                .isDraft(isDraft != null ? isDraft : false)
+                .duration("0:30")
+                .status("PROGRAMADO")
+                .build();
+
+        TikTokScheduledVideo saved = scheduledVideoRepository.save(sched);
+        log.info("Video programado exitosamente (ID: {}) para {}", saved.getId(), scheduledAt);
+        return saved;
+    }
+
+    // --- Tarea Automática de Publicación Programada (@Scheduled cada minuto) ---
+
+    @Scheduled(cron = "0 * * * * *")
+    @Transactional
+    public void processScheduledVideos() {
+        LocalDateTime now = LocalDateTime.now();
+        List<TikTokScheduledVideo> pending = scheduledVideoRepository.findPendingToPublish(now);
+        if (pending.isEmpty()) return;
+
+        log.info("Ejecutando verificador de videos programados de TikTok: {} videos pendientes.", pending.size());
+
+        Optional<TikTokAccount> accOpt = accountRepository.findFirstBySedeNameIgnoreCaseAndStatus("GLOBAL", "CONNECTED");
+        if (!accOpt.isPresent()) {
+            accOpt = accountRepository.findByStatus("CONNECTED").stream().findFirst();
+        }
+
+        if (!accOpt.isPresent()) {
+            log.warn("Hay videos programados pero no hay ninguna cuenta de TikTok conectada.");
+            for (TikTokScheduledVideo s : pending) {
+                s.setStatus("ERROR");
+                s.setErrorMessage("No hay ninguna cuenta de TikTok conectada en el momento de la publicación.");
+                scheduledVideoRepository.save(s);
+            }
+            return;
+        }
+
+        TikTokAccount account = accOpt.get();
+        String accessToken = ensureValidAccessToken(account);
+
+        for (TikTokScheduledVideo s : pending) {
+            try {
+                if (s.getVideoFilePath() == null || !Files.exists(Paths.get(s.getVideoFilePath()))) {
+                    s.setStatus("ERROR");
+                    s.setErrorMessage("El archivo de video local no fue encontrado en el servidor.");
+                    scheduledVideoRepository.save(s);
+                    continue;
+                }
+
+                Path filePath = Paths.get(s.getVideoFilePath());
+                long fileSize = Files.size(filePath);
+
+                String fullCaption = (s.getTitle() != null ? s.getTitle() : "");
+                if (s.getHashtags() != null && !s.getHashtags().isEmpty()) {
+                    fullCaption = fullCaption + " " + s.getHashtags();
+                }
+
+                HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(30)).build();
+
+                // 1. Init
+                ObjectNode initBody = objectMapper.createObjectNode();
+                ObjectNode postInfo = initBody.putObject("post_info");
+                postInfo.put("title", fullCaption);
+                postInfo.put("privacy_level", s.getPrivacyLevel() != null ? s.getPrivacyLevel() : "PUBLIC_TO_EVERYONE");
+                postInfo.put("disable_duet", s.getAllowDuet() != null && !s.getAllowDuet());
+                postInfo.put("disable_comment", s.getAllowComments() != null && !s.getAllowComments());
+                postInfo.put("disable_stitch", s.getAllowStitch() != null && !s.getAllowStitch());
+                postInfo.put("video_cover_timestamp_ms", 1000L);
+
+                ObjectNode sourceInfo = initBody.putObject("source_info");
+                sourceInfo.put("source", "FILE_UPLOAD");
+                sourceInfo.put("video_size", fileSize);
+                sourceInfo.put("chunk_size", fileSize);
+                sourceInfo.put("total_chunk_count", 1);
+
+                HttpRequest initReq = HttpRequest.newBuilder()
+                        .uri(URI.create("https://open.tiktokapis.com/v2/post/publish/video/init/"))
+                        .header("Authorization", "Bearer " + accessToken)
+                        .header("Content-Type", "application/json; charset=UTF-8")
+                        .timeout(Duration.ofSeconds(30))
+                        .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(initBody)))
+                        .build();
+
+                HttpResponse<String> initRes = client.send(initReq, HttpResponse.BodyHandlers.ofString());
+                JsonNode initJson = objectMapper.readTree(initRes.body());
+
+                validateTikTokApiResponse(initRes.statusCode(), initJson, "video.publish (Programado)");
+
+                String publishId = initJson.path("data").path("publish_id").asText();
+                String uploadUrl = initJson.path("data").path("upload_url").asText();
+
+                // 2. Upload
+                HttpRequest uploadReq = HttpRequest.newBuilder()
+                        .uri(URI.create(uploadUrl))
+                        .header("Content-Type", "video/mp4")
+                        .header("Content-Range", "bytes 0-" + (fileSize - 1) + "/" + fileSize)
+                        .timeout(Duration.ofMinutes(5))
+                        .PUT(HttpRequest.BodyPublishers.ofFile(filePath))
+                        .build();
+
+                HttpResponse<String> uploadRes = client.send(uploadReq, HttpResponse.BodyHandlers.ofString());
+                if (uploadRes.statusCode() >= 200 && uploadRes.statusCode() < 300) {
+                    s.setStatus("PUBLICADO");
+                    s.setTiktokPublishId(publishId);
+                    s.setPublishedAt(LocalDateTime.now());
+                    s.setErrorMessage(null);
+                    scheduledVideoRepository.save(s);
+
+                    // Registrar en historial
+                    TikTokVideo newVid = TikTokVideo.builder()
+                            .accountId(account.getId())
+                            .sedeName("GLOBAL")
+                            .videoId(publishId)
+                            .title(s.getTitle())
+                            .description(fullCaption)
+                            .hashtags(s.getHashtags())
+                            .duration(s.getDuration() != null ? s.getDuration() : "0:30")
+                            .publishedAt(LocalDateTime.now())
+                            .viewCount(0L)
+                            .likeCount(0L)
+                            .commentCount(0L)
+                            .shareCount(0L)
+                            .contentType("Video")
+                            .build();
+                    videoRepository.save(newVid);
+                    log.info("Video programado ID {} publicado exitosamente en TikTok con publish_id: {}", s.getId(), publishId);
+                } else {
+                    s.setStatus("ERROR");
+                    s.setErrorMessage("Error al subir binario a TikTok: HTTP " + uploadRes.statusCode());
+                    scheduledVideoRepository.save(s);
+                }
+            } catch (Exception ex) {
+                log.error("Fallo al publicar video programado ID {}: {}", s.getId(), ex.getMessage());
+                s.setStatus("ERROR");
+                s.setErrorMessage(ex.getMessage());
+                scheduledVideoRepository.save(s);
+            }
+        }
+    }
+
+    // --- Helper de validación de respuestas de TikTok ---
+
+    private void validateTikTokApiResponse(int httpCode, JsonNode json, String scopeNeeded) {
+        if (httpCode != 200) {
+            throw new IllegalArgumentException("TikTok rechazó la petición (HTTP " + httpCode + "): " + json.toString());
+        }
+
+        JsonNode errNode = json.path("error");
+        if (!errNode.isMissingNode() && errNode.has("code")) {
+            String codeStr = errNode.path("code").asText("");
+            if (!codeStr.isEmpty() && !"ok".equalsIgnoreCase(codeStr)) {
+                String errMsg = errNode.path("message").asText("Error devuelto por TikTok");
+
+                if ("scope_not_authorized".equalsIgnoreCase(codeStr)) {
+                    throw new IllegalArgumentException("TikTok rechazó la publicación (error: scope_not_authorized). "
+                            + "Tu aplicación en developers.tiktok.com aún no tiene aprobado el permiso oficial '" + scopeNeeded + "'. "
+                            + "Mientras esté en modo desarrollo, agrega la cuenta como Administrador/Tester en la consola de TikTok Developers.");
+                }
+                if ("unaudited_client_can_only_post_to_admin_users".equalsIgnoreCase(codeStr)) {
+                    throw new IllegalArgumentException("TikTok rechazó la publicación: Tu aplicación no está auditada comercialmente y solo puede publicar a cuentas asociadas como testers o administradores.");
+                }
+                if ("access_token_invalid".equalsIgnoreCase(codeStr)) {
+                    throw new IllegalArgumentException("El token de TikTok expiró o fue revocado. Desconecta y vuelve a conectar tu cuenta.");
+                }
+
+                throw new IllegalArgumentException("TikTok rechazó la solicitud (código " + codeStr + "): " + errMsg);
+            }
+        }
+    }
+
+    private TikTokAccount getConnectedGlobalAccount() {
+        Optional<TikTokAccount> accOpt = accountRepository.findFirstBySedeNameIgnoreCaseAndStatus("GLOBAL", "CONNECTED");
+        if (!accOpt.isPresent()) {
+            accOpt = accountRepository.findByStatus("CONNECTED").stream().findFirst();
+        }
+        if (!accOpt.isPresent()) {
+            throw new IllegalStateException("No hay ninguna cuenta de TikTok conectada en JUANDSTORE. Ve a 'Mi cuenta' y conecta tu cuenta con TikTok Login Kit.");
+        }
+        return accOpt.get();
+    }
+
+    private Path saveVideoFileLocally(MultipartFile videoFile) {
+        try {
+            Path dir = Paths.get(UPLOAD_DIR);
+            if (!Files.exists(dir)) {
+                Files.createDirectories(dir);
+            }
+            String original = videoFile.getOriginalFilename() != null ? videoFile.getOriginalFilename() : "video.mp4";
+            String cleanName = original.replaceAll("[^a-zA-Z0-9._-]", "_");
+            String filename = UUID.randomUUID().toString() + "_" + cleanName;
+            Path target = dir.resolve(filename);
+
+            Files.copy(videoFile.getInputStream(), target, StandardCopyOption.REPLACE_EXISTING);
+            return target;
+        } catch (IOException e) {
+            log.error("Error al guardar archivo de video localmente: {}", e.getMessage());
+            throw new RuntimeException("No se pudo almacenar el archivo de video en el servidor: " + e.getMessage(), e);
         }
     }
 
@@ -213,16 +827,17 @@ public class TikTokService {
         }
 
         try {
+            String accessToken = ensureValidAccessToken(account);
             HttpClient client = HttpClient.newBuilder()
-                    .connectTimeout(Duration.ofSeconds(10))
+                    .connectTimeout(Duration.ofSeconds(15))
                     .build();
 
             String postBody = "{\"max_count\": 20}";
             HttpRequest request = HttpRequest.newBuilder()
                     .uri(URI.create("https://open.tiktokapis.com/v2/video/list/?fields=id,title,video_description,duration,cover_image_url,create_time,share_url,like_count,comment_count,share_count,view_count"))
-                    .header("Authorization", "Bearer " + account.getAccessToken())
+                    .header("Authorization", "Bearer " + accessToken)
                     .header("Content-Type", "application/json")
-                    .timeout(Duration.ofSeconds(10))
+                    .timeout(Duration.ofSeconds(15))
                     .POST(HttpRequest.BodyPublishers.ofString(postBody))
                     .build();
 
@@ -253,7 +868,7 @@ public class TikTokService {
                         TikTokVideo vid = existingOpt.orElse(TikTokVideo.builder().videoId(videoId).build());
 
                         vid.setAccountId(account.getId());
-                        vid.setSedeName(account.getSedeName());
+                        vid.setSedeName("GLOBAL");
                         vid.setTitle(title);
                         vid.setDescription(desc);
                         vid.setThumbnailUrl(vNode.path("cover_image_url").asText(null));
@@ -269,179 +884,53 @@ public class TikTokService {
                         videoRepository.save(vid);
                         count++;
                     }
-                    log.info("Sincronizados {} videos oficiales de TikTok para la sede {}", count, account.getSedeName());
+                    log.info("Sincronizados {} videos oficiales de TikTok.", count);
                     return count;
                 }
             } else {
                 log.warn("TikTok Video List devolvió HTTP {}: {}", response.statusCode(), response.body());
             }
         } catch (Exception e) {
-            log.warn("No se pudieron sincronizar videos de TikTok para {}: {}", account.getSedeName(), e.getMessage());
+            log.warn("No se pudieron sincronizar videos de TikTok: {}", e.getMessage());
         }
         return 0;
     }
 
-    // --- Cuentas Vinculadas por Sede ---
+    // --- Cuentas (Retrocompatibilidad) ---
 
     public List<Map<String, Object>> getAccountsStatus() {
-        List<Sede> sedes = sedeRepository.findAll();
+        Optional<TikTokAccount> accOpt = accountRepository.findFirstBySedeNameIgnoreCaseAndStatus("GLOBAL", "CONNECTED");
+        if (!accOpt.isPresent()) {
+            accOpt = accountRepository.findByStatus("CONNECTED").stream().findFirst();
+        }
+
         List<Map<String, Object>> result = new ArrayList<>();
+        Map<String, Object> map = new HashMap<>();
+        map.put("sedeId", 1L);
+        map.put("sedeName", "GLOBAL");
+        map.put("storeName", "JUANDSTORE");
 
-        for (Sede s : sedes) {
-            String sedeName = s.getBarrio() != null && !s.getBarrio().trim().isEmpty() ? s.getBarrio().trim() : s.getName();
-            Optional<TikTokAccount> accOpt = accountRepository.findFirstBySedeNameIgnoreCase(sedeName);
-            if (!accOpt.isPresent() && s.getId() != null) {
-                accOpt = accountRepository.findBySedeId(s.getId());
-            }
-
-            Map<String, Object> map = new HashMap<>();
-            map.put("sedeId", s.getId());
-            map.put("sedeName", sedeName);
-            map.put("storeName", s.getName());
-            map.put("address", s.getAddress());
-            map.put("storeImage", s.getEffectiveImageUrl());
-
-            if (accOpt.isPresent() && "CONNECTED".equalsIgnoreCase(accOpt.get().getStatus())) {
-                TikTokAccount acc = accOpt.get();
-                map.put("connected", true);
-                map.put("accountId", acc.getId());
-                map.put("tiktokAccountId", acc.getAccountId());
-                map.put("openId", acc.getOpenId());
-                map.put("username", acc.getUsername());
-                map.put("displayName", acc.getDisplayName());
-                map.put("avatarUrl", acc.getAvatarUrl());
-                map.put("connectedAt", acc.getConnectedAt());
-                map.put("permissions", acc.getPermissions());
-                map.put("status", "Conectada");
-            } else {
-                map.put("connected", false);
-                map.put("status", "Sin vincular");
-                map.put("username", null);
-                map.put("displayName", null);
-                map.put("avatarUrl", null);
-            }
-            result.add(map);
+        if (accOpt.isPresent()) {
+            TikTokAccount acc = accOpt.get();
+            map.put("connected", true);
+            map.put("accountId", acc.getId());
+            map.put("tiktokAccountId", acc.getAccountId());
+            map.put("openId", acc.getOpenId());
+            map.put("username", acc.getUsername());
+            map.put("displayName", acc.getDisplayName());
+            map.put("avatarUrl", acc.getAvatarUrl());
+            map.put("connectedAt", acc.getConnectedAt());
+            map.put("permissions", acc.getPermissions());
+            map.put("status", "Conectada");
+        } else {
+            map.put("connected", false);
+            map.put("status", "Sin conectar");
+            map.put("username", null);
+            map.put("displayName", null);
+            map.put("avatarUrl", null);
         }
-
+        result.add(map);
         return result;
-    }
-
-    // --- Validación en vivo con TikTok API (oEmbed oficial) ---
-
-    public Map<String, Object> validateTikTokAccount(String username) {
-        if (username == null || username.trim().isEmpty()) {
-            throw new IllegalArgumentException("El nombre de usuario de TikTok es requerido.");
-        }
-
-        String cleanUsername = username.trim();
-        if (cleanUsername.startsWith("@")) {
-            cleanUsername = cleanUsername.substring(1);
-        }
-
-        if (cleanUsername.isEmpty()) {
-            throw new IllegalArgumentException("El nombre de usuario de TikTok no puede estar vacío.");
-        }
-
-        String oembedUrl = "https://www.tiktok.com/oembed?url=https://www.tiktok.com/@" + cleanUsername;
-
-        try {
-            HttpClient client = HttpClient.newBuilder()
-                    .connectTimeout(Duration.ofSeconds(6))
-                    .build();
-
-            HttpRequest request = HttpRequest.newBuilder()
-                    .uri(URI.create(oembedUrl))
-                    .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
-                    .timeout(Duration.ofSeconds(6))
-                    .GET()
-                    .build();
-
-            HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
-
-            if (response.statusCode() == 200) {
-                JsonNode root = objectMapper.readTree(response.body());
-
-                String authorName = root.has("author_name") ? root.get("author_name").asText() : cleanUsername;
-                String authorUrl = root.has("author_url") ? root.get("author_url").asText() : "https://www.tiktok.com/@" + cleanUsername;
-
-                Map<String, Object> result = new HashMap<>();
-                result.put("valid", true);
-                result.put("username", "@" + cleanUsername);
-                result.put("displayName", authorName);
-                result.put("profileUrl", authorUrl);
-                return result;
-            } else {
-                throw new IllegalArgumentException("La cuenta @" + cleanUsername + " no existe en TikTok. Ingresa un usuario real de TikTok.");
-            }
-        } catch (IllegalArgumentException e) {
-            throw e;
-        } catch (Exception e) {
-            log.error("Error al validar cuenta de TikTok con oEmbed: {}", e.getMessage());
-            throw new IllegalArgumentException("No se pudo verificar la cuenta @" + cleanUsername + " con TikTok: " + e.getMessage());
-        }
-    }
-
-    // --- Vinculación directa con verificación de cuenta (sin contraseñas) ---
-
-    @Transactional
-    public TikTokAccount linkAccount(Map<String, Object> body) {
-        String sedeName = (String) body.get("sedeName");
-        Long sedeId = body.get("sedeId") != null ? Long.valueOf(body.get("sedeId").toString()) : null;
-        String rawUsername = (String) body.get("username");
-        String displayName = (String) body.get("displayName");
-        String accountId = (String) body.getOrDefault("accountId", "73" + System.currentTimeMillis());
-        String avatarUrl = (String) body.get("avatarUrl");
-        String accessToken = (String) body.get("accessToken");
-
-        if (sedeName == null || sedeName.trim().isEmpty()) {
-            throw new IllegalArgumentException("El nombre de la sede es requerido.");
-        }
-        if (rawUsername == null || rawUsername.trim().isEmpty()) {
-            throw new IllegalArgumentException("El nombre de usuario de TikTok es requerido.");
-        }
-        String cleanSede = sedeName.trim();
-
-        // Validar obligatoriamente en vivo que la cuenta existe en los servidores de TikTok
-        Map<String, Object> validation = validateTikTokAccount(rawUsername);
-        String realUsername = (String) validation.get("username");
-        String realDisplayName = (String) validation.get("displayName");
-
-        TikTokAccount acc = accountRepository.findFirstBySedeNameIgnoreCase(cleanSede)
-                .orElse(TikTokAccount.builder().sedeName(cleanSede).build());
-
-        acc.setSedeId(sedeId);
-        acc.setSedeName(cleanSede);
-        acc.setUsername(realUsername);
-        acc.setDisplayName(displayName != null && !displayName.trim().isEmpty() ? displayName : realDisplayName);
-        acc.setAccountId(accountId);
-        if (avatarUrl != null && !avatarUrl.trim().isEmpty()) {
-            acc.setAvatarUrl(avatarUrl);
-        }
-        acc.setStatus("CONNECTED");
-        acc.setPermissions("Lectura de perfil y videos públicos");
-        acc.setConnectedAt(LocalDateTime.now());
-        if (accessToken != null && !accessToken.trim().isEmpty()) {
-            acc.setAccessToken(accessToken.trim());
-        }
-
-        TikTokAccount saved = accountRepository.save(acc);
-
-        // Si cuenta con token, sincronizar videos
-        if (saved.getAccessToken() != null && !saved.getAccessToken().startsWith("act_mock")) {
-            syncVideosFromTikTok(saved);
-        }
-
-        return saved;
-    }
-
-    @Transactional
-    public void disconnectAccount(Long id) {
-        accountRepository.findById(id).ifPresent(acc -> {
-            acc.setStatus("DISCONNECTED");
-            acc.setAccessToken(null);
-            acc.setRefreshToken(null);
-            accountRepository.save(acc);
-        });
     }
 
     // --- Resumen General ---
@@ -449,42 +938,15 @@ public class TikTokService {
     public Map<String, Object> getSummary(String sedeFilter, String period) {
         LocalDateTime from = calculatePeriodStart(period);
         LocalDateTime to = LocalDateTime.now();
-        String safeSede = (sedeFilter != null && !sedeFilter.trim().isEmpty()) ? sedeFilter.trim() : "TODAS";
 
-        boolean isLinked = false;
-        if (!"TODAS".equalsIgnoreCase(safeSede)) {
-            Optional<TikTokAccount> accOpt = accountRepository.findFirstBySedeNameIgnoreCaseAndStatus(safeSede, "CONNECTED");
-            isLinked = accOpt.isPresent();
-        } else {
-            isLinked = !accountRepository.findByStatus("CONNECTED").isEmpty();
-        }
-
-        List<TikTokVideo> videos = isLinked
-                ? videoRepository.findFiltered(safeSede, from, to)
-                : Collections.emptyList();
+        boolean isLinked = !accountRepository.findByStatus("CONNECTED").isEmpty();
+        List<TikTokVideo> videos = isLinked ? videoRepository.findAllByOrderByPublishedAtDesc() : Collections.emptyList();
 
         long totalVideos = videos.size();
         long totalViews = videos.stream().mapToLong(v -> v.getViewCount() != null ? v.getViewCount() : 0L).sum();
         long totalLikes = videos.stream().mapToLong(v -> v.getLikeCount() != null ? v.getLikeCount() : 0L).sum();
         long totalComments = videos.stream().mapToLong(v -> v.getCommentCount() != null ? v.getCommentCount() : 0L).sum();
         long totalShares = videos.stream().mapToLong(v -> v.getShareCount() != null ? v.getShareCount() : 0L).sum();
-
-        // Comparativo de visualizaciones por sede (para el gráfico de barras)
-        List<Sede> sedes = sedeRepository.findAll();
-        List<Map<String, Object>> viewsBySede = new ArrayList<>();
-        for (Sede s : sedes) {
-            String sName = s.getBarrio() != null && !s.getBarrio().trim().isEmpty() ? s.getBarrio().trim() : s.getName();
-            long sViews = videos.stream()
-                    .filter(v -> v.getSedeName() != null && v.getSedeName().equalsIgnoreCase(sName))
-                    .mapToLong(v -> v.getViewCount() != null ? v.getViewCount() : 0L)
-                    .sum();
-            Map<String, Object> item = new HashMap<>();
-            item.put("sede", sName);
-            item.put("views", sViews);
-            double pct = totalViews > 0 ? ((double) sViews / totalViews) * 100.0 : 0.0;
-            item.put("percentage", Math.round(pct * 10.0) / 10.0);
-            viewsBySede.add(item);
-        }
 
         List<TikTokVideo> recent = videos.stream().limit(5).collect(Collectors.toList());
 
@@ -495,7 +957,6 @@ public class TikTokService {
         summary.put("meGusta", totalLikes);
         summary.put("comentarios", totalComments);
         summary.put("compartidos", totalShares);
-        summary.put("viewsBySede", viewsBySede);
         summary.put("recentVideos", recent);
 
         return summary;
@@ -504,27 +965,8 @@ public class TikTokService {
     // --- Historial de Publicaciones ---
 
     public Map<String, Object> getHistory(String sede, String dateFrom, String dateTo, String search, String contentType, int page, int size) {
-        LocalDateTime from = (dateFrom != null && !dateFrom.trim().isEmpty()) ? LocalDate.parse(dateFrom).atStartOfDay() : LocalDateTime.of(2000, 1, 1, 0, 0);
-        LocalDateTime to = (dateTo != null && !dateTo.trim().isEmpty()) ? LocalDate.parse(dateTo).atTime(LocalTime.MAX) : LocalDateTime.of(2099, 12, 31, 23, 59, 59);
-        String safeSede = (sede != null && !sede.trim().isEmpty()) ? sede.trim() : "TODAS";
-
-        boolean isLinked = false;
-        if (!"TODAS".equalsIgnoreCase(safeSede)) {
-            Optional<TikTokAccount> accOpt = accountRepository.findFirstBySedeNameIgnoreCaseAndStatus(safeSede, "CONNECTED");
-            isLinked = accOpt.isPresent();
-        } else {
-            isLinked = !accountRepository.findByStatus("CONNECTED").isEmpty();
-        }
-
-        List<TikTokVideo> list = isLinked
-                ? videoRepository.findFiltered(safeSede, from, to)
-                : Collections.emptyList();
-
-        if (contentType != null && !contentType.equalsIgnoreCase("TODOS") && !contentType.trim().isEmpty()) {
-            list = list.stream()
-                    .filter(v -> v.getContentType() != null && v.getContentType().equalsIgnoreCase(contentType))
-                    .collect(Collectors.toList());
-        }
+        boolean isLinked = !accountRepository.findByStatus("CONNECTED").isEmpty();
+        List<TikTokVideo> list = isLinked ? videoRepository.findAllByOrderByPublishedAtDesc() : Collections.emptyList();
 
         if (search != null && !search.trim().isEmpty()) {
             String query = search.toLowerCase().trim();
@@ -570,29 +1012,19 @@ public class TikTokService {
 
         LocalDateTime startDateTime = startMonday.atStartOfDay();
         LocalDateTime endDateTime = endSunday.atTime(LocalTime.MAX);
-        String safeSede = (sede != null && !sede.trim().isEmpty()) ? sede.trim() : "TODAS";
 
-        boolean isLinked = false;
-        String linkedUsername = null;
-        String linkedDisplayName = null;
-        Long linkedAccountId = null;
-
-        if (!"TODAS".equalsIgnoreCase(safeSede)) {
-            Optional<TikTokAccount> accOpt = accountRepository.findFirstBySedeNameIgnoreCaseAndStatus(safeSede, "CONNECTED");
-            if (accOpt.isPresent()) {
-                TikTokAccount acc = accOpt.get();
-                isLinked = true;
-                linkedUsername = acc.getUsername();
-                linkedDisplayName = acc.getDisplayName();
-                linkedAccountId = acc.getId();
-            }
-        } else {
-            List<TikTokAccount> connected = accountRepository.findByStatus("CONNECTED");
-            isLinked = !connected.isEmpty();
+        Optional<TikTokAccount> accOpt = accountRepository.findFirstBySedeNameIgnoreCaseAndStatus("GLOBAL", "CONNECTED");
+        if (!accOpt.isPresent()) {
+            accOpt = accountRepository.findByStatus("CONNECTED").stream().findFirst();
         }
 
+        boolean isLinked = accOpt.isPresent();
+        String linkedUsername = isLinked ? accOpt.get().getUsername() : null;
+        String linkedDisplayName = isLinked ? accOpt.get().getDisplayName() : null;
+        Long linkedAccountId = isLinked ? accOpt.get().getId() : null;
+
         List<TikTokScheduledVideo> scheduledList = isLinked
-                ? scheduledVideoRepository.findBySedeAndDateRange(safeSede, startDateTime, endDateTime)
+                ? scheduledVideoRepository.findBySedeAndDateRange("GLOBAL", startDateTime, endDateTime)
                 : Collections.emptyList();
 
         List<Map<String, Object>> days = new ArrayList<>();
@@ -609,9 +1041,7 @@ public class TikTokService {
                 daysWithContent.add(currentDay);
             }
 
-            Optional<TikTokDayNote> noteOpt = (isLinked && !"TODAS".equalsIgnoreCase(safeSede))
-                    ? dayNoteRepository.findBySedeNameAndNoteDate(safeSede, currentDay)
-                    : Optional.empty();
+            Optional<TikTokDayNote> noteOpt = dayNoteRepository.findBySedeNameAndNoteDate("GLOBAL", currentDay);
 
             Map<String, Object> dayMap = new HashMap<>();
             dayMap.put("dayName", dayNames[i]);
@@ -630,7 +1060,7 @@ public class TikTokService {
         Map<String, Object> result = new HashMap<>();
         result.put("weekStart", startMonday.toString());
         result.put("weekEnd", endSunday.toString());
-        result.put("sede", safeSede);
+        result.put("sede", "GLOBAL");
         result.put("isLinked", isLinked);
         result.put("linkedUsername", linkedUsername);
         result.put("linkedDisplayName", linkedDisplayName);
@@ -641,37 +1071,31 @@ public class TikTokService {
         result.put("programacionActiva", programacionActiva);
         result.put("days", days);
 
-        // Indicador explícito de la limitación de la API oficial de TikTok
-        result.put("apiLimitNotice", "La API oficial de TikTok no ofrece acceso para consultar borradores o programaciones creadas nativamente en TikTok Studio. Todas las programaciones administradas aquí se gestionan de forma segura en la base de datos.");
-        result.put("tiktokStudioUrl", "https://www.tiktok.com/tiktokstudio");
-
         return result;
     }
 
     @Transactional
     public TikTokDayNote saveDayNote(String sedeName, LocalDate date, String note) {
-        TikTokDayNote dayNote = dayNoteRepository.findBySedeNameAndNoteDate(sedeName, date)
-                .orElse(TikTokDayNote.builder().sedeName(sedeName).noteDate(date).build());
+        TikTokDayNote dayNote = dayNoteRepository.findBySedeNameAndNoteDate("GLOBAL", date)
+                .orElse(TikTokDayNote.builder().sedeName("GLOBAL").noteDate(date).build());
         dayNote.setNote(note);
         return dayNoteRepository.save(dayNote);
     }
 
     @Transactional
     public TikTokScheduledVideo addScheduledVideo(TikTokScheduledVideo video) {
-        if (video.getSedeName() == null || video.getSedeName().trim().isEmpty()) {
-            throw new IllegalArgumentException("La sede es requerida para programar un video.");
-        }
         if (video.getTitle() == null || video.getTitle().trim().isEmpty()) {
             throw new IllegalArgumentException("El título del video es requerido.");
         }
         if (video.getScheduledAt() == null) {
             throw new IllegalArgumentException("La fecha y hora de programación es requerida.");
         }
+        video.setSedeName("GLOBAL");
         if (video.getStatus() == null || video.getStatus().trim().isEmpty()) {
             video.setStatus("PROGRAMADO");
         }
         if (video.getDuration() == null || video.getDuration().trim().isEmpty()) {
-            video.setDuration("0:24");
+            video.setDuration("0:30");
         }
         return scheduledVideoRepository.save(video);
     }
@@ -681,7 +1105,6 @@ public class TikTokService {
         scheduledVideoRepository.deleteById(id);
     }
 
-    // Helper período
     private LocalDateTime calculatePeriodStart(String period) {
         if (period == null) return LocalDateTime.now().minusDays(7);
         switch (period.toUpperCase()) {

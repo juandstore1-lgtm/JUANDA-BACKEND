@@ -25,13 +25,15 @@ public class AuditLogController {
     @GetMapping
     public ResponseEntity<Page<AuditLogDTO>> getAuditLogs(
             @RequestParam(required = false) Long userId,
+            @RequestParam(required = false) Long storeId,
             @RequestParam(required = false) String actionType,
             @RequestParam(required = false) String entityType,
+            @RequestParam(required = false) String search,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime startDate,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime endDate,
-            @PageableDefault(size = 20, sort = "createdAt", direction = Sort.Direction.DESC) Pageable pageable) {
+            @PageableDefault(size = 50, sort = "createdAt", direction = Sort.Direction.DESC) Pageable pageable) {
 
-        Page<AuditLogDTO> logs = auditLogService.getAuditLogs(userId, actionType, entityType, startDate, endDate, pageable);
+        Page<AuditLogDTO> logs = auditLogService.getAuditLogs(userId, storeId, actionType, entityType, search, startDate, endDate, pageable);
         return ResponseEntity.ok(logs);
     }
 }

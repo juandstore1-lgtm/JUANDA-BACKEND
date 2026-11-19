@@ -30,6 +30,8 @@ public class AuditEventListener {
                     .previousData(event.getPreviousData())
                     .newData(event.getNewData())
                     .ipAddress(event.getIpAddress())
+                    .storeId(event.getStoreId())
+                    .storeName(event.getStoreName())
                     .build();
 
             auditLogRepository.save(auditLog);

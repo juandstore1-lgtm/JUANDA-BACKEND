@@ -7,10 +7,13 @@ import com.jdqstore.backend.entity.TikTokScheduledVideo;
 import com.jdqstore.backend.service.TikTokService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.format.annotation.DateTimeFormat;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 
@@ -27,8 +30,14 @@ public class AdminTikTokController {
         return ResponseEntity.ok(tikTokService.getOAuthConfig());
     }
 
+    @PostMapping("/oauth/config")
+    @Auditable(action = "UPDATE_TIKTOK_CONFIG", entity = "TIKTOK_CONFIG")
+    public ResponseEntity<Map<String, Object>> saveOAuthConfig(@RequestBody Map<String, String> body) {
+        return ResponseEntity.ok(tikTokService.saveOAuthConfig(body));
+    }
+
     @GetMapping("/oauth/authorize-url")
-    public ResponseEntity<Map<String, String>> getAuthorizeUrl(@RequestParam(required = false, defaultValue = "TODAS") String sede) {
+    public ResponseEntity<Map<String, String>> getAuthorizeUrl(@RequestParam(required = false, defaultValue = "GLOBAL") String sede) {
         return ResponseEntity.ok(Map.of("url", tikTokService.getAuthorizationUrl(sede)));
     }
 
@@ -36,39 +45,79 @@ public class AdminTikTokController {
     @Auditable(action = "TIKTOK_OAUTH_CONNECT", entity = "TIKTOK_ACCOUNT")
     public ResponseEntity<TikTokAccount> handleOAuthCallback(@RequestBody Map<String, String> body) {
         String code = body.get("code");
-        String sede = body.get("sede");
+        String sede = body.getOrDefault("sede", "GLOBAL");
         return ResponseEntity.ok(tikTokService.exchangeOAuthCode(code, sede));
     }
 
-    // --- Cuentas por sede ---
+    // --- Cuenta Global (Administrador Global) ---
+    @GetMapping("/account")
+    public ResponseEntity<Map<String, Object>> getGlobalAccount() {
+        return ResponseEntity.ok(tikTokService.getGlobalAccount());
+    }
+
+    @PostMapping("/account/disconnect")
+    @Auditable(action = "DISCONNECT_TIKTOK_GLOBAL_ACCOUNT", entity = "TIKTOK_ACCOUNT")
+    public ResponseEntity<Map<String, String>> disconnectGlobalAccount() {
+        tikTokService.disconnectGlobalAccount();
+        return ResponseEntity.ok(Map.of("message", "Cuenta de TikTok desconectada exitosamente"));
+    }
+
+    // --- Retrocompatibilidad con sedes ---
     @GetMapping("/accounts")
     public ResponseEntity<List<Map<String, Object>>> getAccounts() {
         return ResponseEntity.ok(tikTokService.getAccountsStatus());
     }
 
-    @PostMapping("/accounts/validate")
-    public ResponseEntity<Map<String, Object>> validateAccount(@RequestBody Map<String, String> body) {
-        String username = body.get("username");
-        return ResponseEntity.ok(tikTokService.validateTikTokAccount(username));
-    }
-
-    @PostMapping("/accounts/link")
-    @Auditable(action = "LINK_TIKTOK_ACCOUNT", entity = "TIKTOK_ACCOUNT")
-    public ResponseEntity<TikTokAccount> linkAccount(@RequestBody Map<String, Object> body) {
-        return ResponseEntity.ok(tikTokService.linkAccount(body));
-    }
-
     @PostMapping("/accounts/{id}/disconnect")
     @Auditable(action = "DISCONNECT_TIKTOK_ACCOUNT", entity = "TIKTOK_ACCOUNT")
     public ResponseEntity<Map<String, String>> disconnectAccount(@PathVariable Long id) {
-        tikTokService.disconnectAccount(id);
+        tikTokService.disconnectGlobalAccount();
         return ResponseEntity.ok(Map.of("message", "Cuenta de TikTok desconectada correctamente"));
+    }
+
+    // --- Publicar Video Real (Content Posting API v2) ---
+    @PostMapping(value = "/publish", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @Auditable(action = "PUBLISH_TIKTOK_VIDEO", entity = "TIKTOK_VIDEO")
+    public ResponseEntity<Map<String, Object>> publishVideo(
+            @RequestParam("video") MultipartFile video,
+            @RequestParam(value = "title", required = false) String title,
+            @RequestParam(value = "hashtags", required = false) String hashtags,
+            @RequestParam(value = "privacyLevel", required = false, defaultValue = "PUBLIC_TO_EVERYONE") String privacyLevel,
+            @RequestParam(value = "allowComments", required = false, defaultValue = "true") Boolean allowComments,
+            @RequestParam(value = "allowDuet", required = false, defaultValue = "true") Boolean allowDuet,
+            @RequestParam(value = "allowStitch", required = false, defaultValue = "true") Boolean allowStitch,
+            @RequestParam(value = "coverTimestampMs", required = false, defaultValue = "1000") Long coverTimestampMs,
+            @RequestParam(value = "isDraft", required = false, defaultValue = "false") Boolean isDraft
+    ) {
+        return ResponseEntity.ok(tikTokService.publishVideo(
+                video, title, hashtags, privacyLevel, allowComments, allowDuet, allowStitch, coverTimestampMs, isDraft
+        ));
+    }
+
+    // --- Programar Video para Publicación Semanal ---
+    @PostMapping(value = "/schedule", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @Auditable(action = "SCHEDULE_TIKTOK_VIDEO", entity = "TIKTOK_SCHEDULE")
+    public ResponseEntity<TikTokScheduledVideo> scheduleVideo(
+            @RequestParam("video") MultipartFile video,
+            @RequestParam(value = "title", required = false) String title,
+            @RequestParam(value = "hashtags", required = false) String hashtags,
+            @RequestParam(value = "privacyLevel", required = false, defaultValue = "PUBLIC_TO_EVERYONE") String privacyLevel,
+            @RequestParam(value = "allowComments", required = false, defaultValue = "true") Boolean allowComments,
+            @RequestParam(value = "allowDuet", required = false, defaultValue = "true") Boolean allowDuet,
+            @RequestParam(value = "allowStitch", required = false, defaultValue = "true") Boolean allowStitch,
+            @RequestParam(value = "coverTimestampMs", required = false, defaultValue = "1000") Long coverTimestampMs,
+            @RequestParam("scheduledAt") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime scheduledAt,
+            @RequestParam(value = "isDraft", required = false, defaultValue = "false") Boolean isDraft
+    ) {
+        return ResponseEntity.ok(tikTokService.scheduleVideo(
+                video, title, hashtags, privacyLevel, allowComments, allowDuet, allowStitch, coverTimestampMs, scheduledAt, isDraft
+        ));
     }
 
     // --- Resumen General ---
     @GetMapping("/summary")
     public ResponseEntity<Map<String, Object>> getSummary(
-            @RequestParam(required = false, defaultValue = "TODAS") String sede,
+            @RequestParam(required = false, defaultValue = "GLOBAL") String sede,
             @RequestParam(required = false, defaultValue = "ESTA_SEMANA") String period
     ) {
         return ResponseEntity.ok(tikTokService.getSummary(sede, period));
@@ -77,7 +126,7 @@ public class AdminTikTokController {
     // --- Historial de Publicaciones ---
     @GetMapping("/history")
     public ResponseEntity<Map<String, Object>> getHistory(
-            @RequestParam(required = false, defaultValue = "TODAS") String sede,
+            @RequestParam(required = false, defaultValue = "GLOBAL") String sede,
             @RequestParam(required = false) String dateFrom,
             @RequestParam(required = false) String dateTo,
             @RequestParam(required = false) String search,
@@ -91,7 +140,7 @@ public class AdminTikTokController {
     // --- Programación Semanal ---
     @GetMapping("/scheduled")
     public ResponseEntity<Map<String, Object>> getWeeklySchedule(
-            @RequestParam(required = false, defaultValue = "TODAS") String sede,
+            @RequestParam(required = false, defaultValue = "GLOBAL") String sede,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate weekStart
     ) {
         return ResponseEntity.ok(tikTokService.getWeeklySchedule(sede, weekStart));
@@ -100,7 +149,7 @@ public class AdminTikTokController {
     @PostMapping("/scheduled/notes")
     @Auditable(action = "SAVE_TIKTOK_NOTE", entity = "TIKTOK_SCHEDULE")
     public ResponseEntity<TikTokDayNote> saveDayNote(@RequestBody Map<String, Object> body) {
-        String sede = (String) body.get("sedeName");
+        String sede = (String) body.getOrDefault("sedeName", "GLOBAL");
         String dateStr = (String) body.get("date");
         String note = (String) body.get("note");
         LocalDate date = LocalDate.parse(dateStr);
@@ -109,7 +158,7 @@ public class AdminTikTokController {
 
     @PostMapping("/scheduled/sync")
     public ResponseEntity<Map<String, Object>> syncScheduled(
-            @RequestParam(required = false, defaultValue = "TODAS") String sede,
+            @RequestParam(required = false, defaultValue = "GLOBAL") String sede,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate weekStart
     ) {
         return ResponseEntity.ok(tikTokService.getWeeklySchedule(sede, weekStart));

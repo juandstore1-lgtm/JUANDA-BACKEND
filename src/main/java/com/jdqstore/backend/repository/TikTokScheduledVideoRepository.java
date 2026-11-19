@@ -22,4 +22,7 @@ public interface TikTokScheduledVideoRepository extends JpaRepository<TikTokSche
     );
 
     List<TikTokScheduledVideo> findBySedeNameOrderByScheduledAtAsc(String sedeName);
+
+    @Query("SELECT s FROM TikTokScheduledVideo s WHERE s.status = 'PROGRAMADO' AND s.scheduledAt <= :now ORDER BY s.scheduledAt ASC")
+    List<TikTokScheduledVideo> findPendingToPublish(@Param("now") LocalDateTime now);
 }

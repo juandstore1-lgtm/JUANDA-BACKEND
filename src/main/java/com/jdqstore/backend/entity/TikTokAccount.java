@@ -58,6 +58,9 @@ public class TikTokAccount {
     @Column(name = "token_expires_at")
     private LocalDateTime tokenExpiresAt;
 
+    @Column(name = "refresh_token_expires_at")
+    private LocalDateTime refreshTokenExpiresAt;
+
     @Column(name = "connected_at")
     private LocalDateTime connectedAt;
 

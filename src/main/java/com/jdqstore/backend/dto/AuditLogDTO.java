@@ -23,5 +23,7 @@ public class AuditLogDTO {
     private String previousData;
     private String newData;
     private String ipAddress;
+    private Long storeId;
+    private String storeName;
     private LocalDateTime createdAt;
 }

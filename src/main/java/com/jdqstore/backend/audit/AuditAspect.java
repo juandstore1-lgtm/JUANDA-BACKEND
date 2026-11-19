@@ -1,11 +1,14 @@
 package com.jdqstore.backend.audit;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.jdqstore.backend.dto.ProductDTO;
 import com.jdqstore.backend.entity.Category;
 import com.jdqstore.backend.entity.Product;
+import com.jdqstore.backend.entity.Sede;
 import com.jdqstore.backend.entity.User;
 import com.jdqstore.backend.repository.CategoryRepository;
 import com.jdqstore.backend.repository.ProductRepository;
+import com.jdqstore.backend.repository.SedeRepository;
 import com.jdqstore.backend.security.ClientIpResolver;
 import com.jdqstore.backend.security.UserDetailsImpl;
 import jakarta.servlet.http.HttpServletRequest;
@@ -36,6 +39,7 @@ public class AuditAspect {
     private final ClientIpResolver clientIpResolver;
     private final ProductRepository productRepository;
     private final CategoryRepository categoryRepository;
+    private final SedeRepository sedeRepository;
     private final ObjectMapper objectMapper;
 
     @Around("@annotation(auditable)")
@@ -73,7 +77,7 @@ public class AuditAspect {
             // Audit failed security attempt if user was authenticated
             if (currentUser != null) {
                 publishEvent(currentUser, "ACCESS_DENIED", auditable.entity(), entityId,
-                        previousDataJson, "{\"error\":\"" + ex.getMessage() + "\"}", ipAddress);
+                        previousDataJson, "{\"error\":\"" + ex.getMessage() + "\"}", ipAddress, null, null);
             }
             throw ex;
         }
@@ -91,8 +95,11 @@ public class AuditAspect {
                     }
                 }
 
+                Long storeId = extractStoreId(joinPoint.getArgs(), currentUser, previousDataJson, newDataJson);
+                String storeName = resolveStoreName(storeId);
+
                 publishEvent(currentUser, auditable.action(), auditable.entity(), entityId,
-                        previousDataJson, newDataJson, ipAddress);
+                        previousDataJson, newDataJson, ipAddress, storeId, storeName);
             } catch (Exception e) {
                 log.warn("Could not publish audit event after method execution: {}", e.getMessage());
             }
@@ -101,8 +108,57 @@ public class AuditAspect {
         return result;
     }
 
+    private Long extractStoreId(Object[] args, User user, String previousDataJson, String newDataJson) {
+        if (args != null) {
+            for (Object arg : args) {
+                if (arg instanceof ProductDTO dto && dto.getStoreIds() != null && !dto.getStoreIds().isEmpty()) {
+                    return dto.getStoreIds().get(0);
+                }
+            }
+        }
+        try {
+            if (newDataJson != null) {
+                var node = objectMapper.readTree(newDataJson);
+                if (node.has("storeIds") && node.get("storeIds").isArray() && node.get("storeIds").size() > 0) {
+                    return node.get("storeIds").get(0).asLong();
+                }
+                if (node.has("storeId")) {
+                    return node.get("storeId").asLong();
+                }
+            }
+            if (previousDataJson != null) {
+                var node = objectMapper.readTree(previousDataJson);
+                if (node.has("stores") && node.get("stores").isArray() && node.get("stores").size() > 0) {
+                    return node.get("stores").get(0).get("id").asLong();
+                }
+                if (node.has("storeIds") && node.get("storeIds").isArray() && node.get("storeIds").size() > 0) {
+                    return node.get("storeIds").get(0).asLong();
+                }
+            }
+        } catch (Exception ignored) {}
+
+        if (user != null && user.getStores() != null && !user.getStores().isEmpty()) {
+            return user.getStores().get(0).getId();
+        }
+        return null;
+    }
+
+    private String resolveStoreName(Long storeId) {
+        if (storeId == null) return null;
+        try {
+            Optional<Sede> sede = sedeRepository.findById(storeId);
+            if (sede.isPresent()) {
+                String name = sede.get().getName();
+                String barrio = sede.get().getBarrio();
+                return (barrio != null && !barrio.isBlank()) ? barrio : name;
+            }
+        } catch (Exception ignored) {}
+        return null;
+    }
+
     private void publishEvent(User user, String action, String entity, String entityId,
-                              String previousData, String newData, String ip) {
+                              String previousData, String newData, String ip,
+                              Long storeId, String storeName) {
         String role = user.getRole() != null ? user.getRole().getName() : "UNKNOWN";
         AuditEvent event = AuditEvent.builder()
                 .userId(user.getId())
@@ -115,6 +171,8 @@ public class AuditAspect {
                 .previousData(previousData)
                 .newData(newData)
                 .ipAddress(ip)
+                .storeId(storeId)
+                .storeName(storeName)
                 .build();
 
         eventPublisher.publishEvent(event);

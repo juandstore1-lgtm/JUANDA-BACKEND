@@ -25,12 +25,21 @@ public class AuditLogService {
     public Page<AuditLogDTO> getAuditLogs(Long userId, String actionType, String entityType,
                                           LocalDateTime startDate, LocalDateTime endDate,
                                           Pageable pageable) {
+        return getAuditLogs(userId, null, actionType, entityType, null, startDate, endDate, pageable);
+    }
+
+    public Page<AuditLogDTO> getAuditLogs(Long userId, Long storeId, String actionType, String entityType,
+                                          String search, LocalDateTime startDate, LocalDateTime endDate,
+                                          Pageable pageable) {
 
         Specification<AuditLog> spec = (root, query, cb) -> {
             List<Predicate> predicates = new ArrayList<>();
 
             if (userId != null) {
                 predicates.add(cb.equal(root.get("userId"), userId));
+            }
+            if (storeId != null) {
+                predicates.add(cb.equal(root.get("storeId"), storeId));
             }
             if (actionType != null && !actionType.trim().isEmpty()) {
                 predicates.add(cb.equal(cb.upper(root.get("actionType")), actionType.trim().toUpperCase()));
@@ -43,6 +52,15 @@ public class AuditLogService {
             }
             if (endDate != null) {
                 predicates.add(cb.lessThanOrEqualTo(root.get("createdAt"), endDate));
+            }
+            if (search != null && !search.trim().isEmpty()) {
+                String term = "%" + search.trim().toLowerCase() + "%";
+                predicates.add(cb.or(
+                    cb.like(cb.lower(root.get("userName")), term),
+                    cb.like(cb.lower(root.get("entityId")), term),
+                    cb.like(cb.lower(root.get("previousData")), term),
+                    cb.like(cb.lower(root.get("newData")), term)
+                ));
             }
 
             return cb.and(predicates.toArray(new Predicate[0]));
@@ -64,6 +82,8 @@ public class AuditLogService {
                 .previousData(entity.getPreviousData())
                 .newData(entity.getNewData())
                 .ipAddress(entity.getIpAddress())
+                .storeId(entity.getStoreId())
+                .storeName(entity.getStoreName())
                 .createdAt(entity.getCreatedAt())
                 .build();
     }

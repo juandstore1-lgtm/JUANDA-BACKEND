@@ -52,6 +52,12 @@ public class AuditLog {
     @Column(name = "ip_address", length = 45)
     private String ipAddress;
 
+    @Column(name = "store_id")
+    private Long storeId;
+
+    @Column(name = "store_name", length = 100)
+    private String storeName;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
 

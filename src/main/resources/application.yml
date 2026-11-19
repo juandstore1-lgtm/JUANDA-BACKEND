@@ -40,6 +40,6 @@ cloudflare:
 tiktok:
   client-key: ${TIKTOK_CLIENT_KEY:}
   client-secret: ${TIKTOK_CLIENT_SECRET:}
-  redirect-uri: ${TIKTOK_REDIRECT_URI:http://localhost:3000/admin/tiktok/callback}
+  redirect-uri: ${TIKTOK_REDIRECT_URI:https://www.juandstore.com/admin/tiktok/callback}
 
 
