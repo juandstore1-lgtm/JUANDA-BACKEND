@@ -95,7 +95,7 @@ public class BackendApplication {
                 "ALTER TABLE tiktok_scheduled_videos ADD COLUMN IF NOT EXISTS published_at TIMESTAMP;",
                 "INSERT INTO tiktok_settings (id, client_key, client_secret, redirect_uri, updated_at) " +
                     "VALUES (1, 'sbaw8ymhocmewzu9lt', 'aSoOp8oM0mlaVF13PlMkDrJsdjEQWPGG', 'https://www.juandstore.com/admin/tiktok/callback', CURRENT_TIMESTAMP) " +
-                    "ON CONFLICT (id) DO UPDATE SET client_key = EXCLUDED.client_key, client_secret = EXCLUDED.client_secret, redirect_uri = EXCLUDED.redirect_uri, updated_at = EXCLUDED.updated_at;"
+                    "ON CONFLICT (id) DO NOTHING;"
             };
 
             for (String sql : ddlStatements) {

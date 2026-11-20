@@ -117,13 +117,23 @@ public class AdminTikTokController {
         ));
     }
 
-    // --- Resumen General ---
+    // --- Resumen General y Analíticas ---
     @GetMapping("/summary")
     public ResponseEntity<Map<String, Object>> getSummary(
             @RequestParam(required = false, defaultValue = "GLOBAL") String sede,
             @RequestParam(required = false, defaultValue = "ESTA_SEMANA") String period
     ) {
         return ResponseEntity.ok(tikTokService.getSummary(sede, period));
+    }
+
+    @GetMapping("/analytics")
+    public ResponseEntity<Map<String, Object>> getAnalytics(
+            @RequestParam(required = false, defaultValue = "TODO") String period,
+            @RequestParam(required = false) String startDate,
+            @RequestParam(required = false) String endDate,
+            @RequestParam(required = false) String specificDate
+    ) {
+        return ResponseEntity.ok(tikTokService.getAnalytics(period, startDate, endDate, specificDate));
     }
 
     // --- Historial de Publicaciones ---

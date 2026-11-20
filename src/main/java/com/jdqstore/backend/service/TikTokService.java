@@ -26,6 +26,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
 import java.time.*;
+import java.time.format.TextStyle;
 import java.time.temporal.TemporalAdjusters;
 import java.util.*;
 import java.util.stream.Collectors;
@@ -1036,6 +1037,213 @@ public class TikTokService {
         summary.put("recentVideos", recent);
 
         return summary;
+    }
+
+    // --- Dashboard de Analíticas Avanzadas de TikTok ---
+
+    public Map<String, Object> getAnalytics(
+            String period,
+            String startDateStr,
+            String endDateStr,
+            String specificDateStr
+    ) {
+        Optional<TikTokAccount> accOpt = accountRepository.findByStatus("CONNECTED").stream().findFirst();
+        boolean isLinked = accOpt.isPresent();
+        if (isLinked && videoRepository.count() == 0) {
+            try {
+                syncVideosFromTikTok(accOpt.get());
+            } catch (Exception e) {
+                log.warn("Auto-sync de videos en getAnalytics omitido: {}", e.getMessage());
+            }
+        }
+
+        List<TikTokVideo> allVideos = videoRepository.findAllByOrderByPublishedAtDesc();
+
+        // 1. Determinar rango de fechas de filtrado
+        LocalDateTime from;
+        LocalDateTime to;
+
+        if (specificDateStr != null && !specificDateStr.trim().isEmpty()) {
+            LocalDate specificDate = LocalDate.parse(specificDateStr.trim());
+            from = specificDate.atStartOfDay();
+            to = specificDate.atTime(LocalTime.MAX);
+        } else if (startDateStr != null && !startDateStr.trim().isEmpty()) {
+            LocalDate start = LocalDate.parse(startDateStr.trim());
+            from = start.atStartOfDay();
+            if (endDateStr != null && !endDateStr.trim().isEmpty()) {
+                to = LocalDate.parse(endDateStr.trim()).atTime(LocalTime.MAX);
+            } else {
+                to = LocalDateTime.now();
+            }
+        } else {
+            String p = (period != null && !period.trim().isEmpty()) ? period.trim().toUpperCase() : "TODO";
+            switch (p) {
+                case "HOY":
+                case "DIARIO":
+                    from = LocalDate.now().atStartOfDay();
+                    to = LocalDateTime.now();
+                    break;
+                case "ESTA_SEMANA":
+                case "SEMANAL":
+                    from = LocalDate.now().with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY)).atStartOfDay();
+                    to = LocalDateTime.now();
+                    break;
+                case "ESTE_MES":
+                case "MENSUAL":
+                    from = LocalDate.now().with(TemporalAdjusters.firstDayOfMonth()).atStartOfDay();
+                    to = LocalDateTime.now();
+                    break;
+                case "ULTIMOS_30_DIAS":
+                    from = LocalDateTime.now().minusDays(30);
+                    to = LocalDateTime.now();
+                    break;
+                case "ULTIMOS_90_DIAS":
+                    from = LocalDateTime.now().minusDays(90);
+                    to = LocalDateTime.now();
+                    break;
+                case "TODO":
+                default:
+                    from = LocalDateTime.of(2020, 1, 1, 0, 0);
+                    to = LocalDateTime.now().plusDays(1);
+                    break;
+            }
+        }
+
+        // 2. Filtrar videos por el período
+        final LocalDateTime finalFrom = from;
+        final LocalDateTime finalTo = to;
+        List<TikTokVideo> periodVideos = allVideos.stream()
+                .filter(v -> v.getPublishedAt() != null
+                        && !v.getPublishedAt().isBefore(finalFrom)
+                        && !v.getPublishedAt().isAfter(finalTo))
+                .collect(Collectors.toList());
+
+        long totalVideos = periodVideos.size();
+        long totalViews = periodVideos.stream().mapToLong(v -> v.getViewCount() != null ? v.getViewCount() : 0L).sum();
+        long totalLikes = periodVideos.stream().mapToLong(v -> v.getLikeCount() != null ? v.getLikeCount() : 0L).sum();
+        long totalComments = periodVideos.stream().mapToLong(v -> v.getCommentCount() != null ? v.getCommentCount() : 0L).sum();
+        long totalShares = periodVideos.stream().mapToLong(v -> v.getShareCount() != null ? v.getShareCount() : 0L).sum();
+
+        long totalInteractions = totalLikes + totalComments + totalShares;
+        double engagementRate = totalViews > 0
+                ? Math.round(((double) totalInteractions / totalViews) * 10000.0) / 100.0
+                : 0.0;
+        double avgViewsPerVideo = totalVideos > 0 ? Math.round((double) totalViews / totalVideos) : 0;
+        double avgLikesPerVideo = totalVideos > 0 ? Math.round((double) totalLikes / totalVideos) : 0;
+
+        // 3. Top Videos Más Virales (Ordenados por visualizaciones desc)
+        List<TikTokVideo> topViralVideos = periodVideos.stream()
+                .sorted(Comparator.comparing((TikTokVideo v) -> v.getViewCount() != null ? v.getViewCount() : 0L).reversed())
+                .limit(10)
+                .collect(Collectors.toList());
+
+        // Si en el período específico no hay suficientes videos, pero en allVideos sí, incluir top global
+        if (topViralVideos.isEmpty() && !allVideos.isEmpty()) {
+            topViralVideos = allVideos.stream()
+                    .sorted(Comparator.comparing((TikTokVideo v) -> v.getViewCount() != null ? v.getViewCount() : 0L).reversed())
+                    .limit(5)
+                    .collect(Collectors.toList());
+        }
+
+        // 4. Semana más viral (agrupando allVideos por semana ISO: Lunes de cada semana)
+        Map<String, List<TikTokVideo>> videosByWeek = allVideos.stream()
+                .filter(v -> v.getPublishedAt() != null)
+                .collect(Collectors.groupingBy(v -> {
+                    LocalDate d = v.getPublishedAt().toLocalDate();
+                    LocalDate monday = d.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY));
+                    return monday.toString();
+                }));
+
+        Map<String, Object> mostViralWeek = new HashMap<>();
+        long maxWeekViews = -1;
+        for (Map.Entry<String, List<TikTokVideo>> entry : videosByWeek.entrySet()) {
+            String weekStart = entry.getKey();
+            List<TikTokVideo> wVideos = entry.getValue();
+            long wViews = wVideos.stream().mapToLong(v -> v.getViewCount() != null ? v.getViewCount() : 0L).sum();
+            long wLikes = wVideos.stream().mapToLong(v -> v.getLikeCount() != null ? v.getLikeCount() : 0L).sum();
+            if (wViews > maxWeekViews) {
+                maxWeekViews = wViews;
+                LocalDate wStartDate = LocalDate.parse(weekStart);
+                LocalDate wEndDate = wStartDate.plusDays(6);
+                String monthLabel = wEndDate.getMonth().getDisplayName(TextStyle.SHORT, new Locale("es", "CO"));
+                mostViralWeek.put("weekStart", weekStart);
+                mostViralWeek.put("weekEnd", wEndDate.toString());
+                mostViralWeek.put("label", "Semana del " + wStartDate.getDayOfMonth() + " al " + wEndDate.getDayOfMonth() + " " + monthLabel);
+                mostViralWeek.put("totalViews", wViews);
+                mostViralWeek.put("totalLikes", wLikes);
+                mostViralWeek.put("videoCount", wVideos.size());
+            }
+        }
+
+        // 5. Mes más viral (agrupando allVideos por año-mes)
+        Map<String, List<TikTokVideo>> videosByMonth = allVideos.stream()
+                .filter(v -> v.getPublishedAt() != null)
+                .collect(Collectors.groupingBy(v -> {
+                    LocalDate d = v.getPublishedAt().toLocalDate();
+                    return d.getYear() + "-" + String.format("%02d", d.getMonthValue());
+                }));
+
+        Map<String, Object> mostViralMonth = new HashMap<>();
+        long maxMonthViews = -1;
+        for (Map.Entry<String, List<TikTokVideo>> entry : videosByMonth.entrySet()) {
+            String yMonth = entry.getKey();
+            List<TikTokVideo> mVideos = entry.getValue();
+            long mViews = mVideos.stream().mapToLong(v -> v.getViewCount() != null ? v.getViewCount() : 0L).sum();
+            long mLikes = mVideos.stream().mapToLong(v -> v.getLikeCount() != null ? v.getLikeCount() : 0L).sum();
+            if (mViews > maxMonthViews) {
+                maxMonthViews = mViews;
+                String[] parts = yMonth.split("-");
+                int year = Integer.parseInt(parts[0]);
+                int month = Integer.parseInt(parts[1]);
+                String monthName = Month.of(month).getDisplayName(TextStyle.FULL, new Locale("es", "CO"));
+                mostViralMonth.put("yearMonth", yMonth);
+                mostViralMonth.put("monthName", monthName.substring(0, 1).toUpperCase() + monthName.substring(1) + " " + year);
+                mostViralMonth.put("totalViews", mViews);
+                mostViralMonth.put("totalLikes", mLikes);
+                mostViralMonth.put("videoCount", mVideos.size());
+            }
+        }
+
+        // 6. Timeline de actividad para gráficos
+        Map<String, List<TikTokVideo>> videosByDate = periodVideos.stream()
+                .filter(v -> v.getPublishedAt() != null)
+                .collect(Collectors.groupingBy(v -> v.getPublishedAt().toLocalDate().toString()));
+
+        List<Map<String, Object>> timeline = new ArrayList<>();
+        videosByDate.entrySet().stream()
+                .sorted(Map.Entry.comparingByKey())
+                .forEach(e -> {
+                    Map<String, Object> point = new HashMap<>();
+                    point.put("date", e.getKey());
+                    point.put("videos", e.getValue().size());
+                    point.put("views", e.getValue().stream().mapToLong(v -> v.getViewCount() != null ? v.getViewCount() : 0L).sum());
+                    point.put("likes", e.getValue().stream().mapToLong(v -> v.getLikeCount() != null ? v.getLikeCount() : 0L).sum());
+                    point.put("comments", e.getValue().stream().mapToLong(v -> v.getCommentCount() != null ? v.getCommentCount() : 0L).sum());
+                    timeline.add(point);
+                });
+
+        Map<String, Object> res = new HashMap<>();
+        res.put("isLinked", isLinked);
+        res.put("accountUsername", accOpt.map(TikTokAccount::getUsername).orElse("@juandstore"));
+        res.put("accountDisplayName", accOpt.map(TikTokAccount::getDisplayName).orElse("JUANDSTORE"));
+        res.put("totalAllVideos", allVideos.size());
+        res.put("totalPeriodVideos", totalVideos);
+        res.put("totalViews", totalViews);
+        res.put("totalLikes", totalLikes);
+        res.put("totalComments", totalComments);
+        res.put("totalShares", totalShares);
+        res.put("engagementRate", engagementRate);
+        res.put("avgViewsPerVideo", avgViewsPerVideo);
+        res.put("avgLikesPerVideo", avgLikesPerVideo);
+        res.put("filterFrom", from.toString());
+        res.put("filterTo", to.toString());
+        res.put("topViralVideos", topViralVideos);
+        res.put("mostViralWeek", mostViralWeek);
+        res.put("mostViralMonth", mostViralMonth);
+        res.put("timeline", timeline);
+        res.put("videos", periodVideos);
+
+        return res;
     }
 
     // --- Historial de Publicaciones ---
