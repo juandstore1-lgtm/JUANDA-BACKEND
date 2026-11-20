@@ -38,8 +38,8 @@ cloudflare:
     presigned-url-expiration-minutes: ${R2_PRESIGNED_EXPIRATION_MINUTES:15}
 
 tiktok:
-  client-key: ${TIKTOK_CLIENT_KEY:}
-  client-secret: ${TIKTOK_CLIENT_SECRET:}
+  client-key: ${TIKTOK_CLIENT_KEY:sbaw8ymhocmewzu9lt}
+  client-secret: ${TIKTOK_CLIENT_SECRET:aSoOp8oM0mlaVF13PlMkDrJsdjEQWPGG}
   redirect-uri: ${TIKTOK_REDIRECT_URI:https://www.juandstore.com/admin/tiktok/callback}
 
 
