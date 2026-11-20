@@ -37,8 +37,11 @@ public class AdminTikTokController {
     }
 
     @GetMapping("/oauth/authorize-url")
-    public ResponseEntity<Map<String, String>> getAuthorizeUrl(@RequestParam(required = false, defaultValue = "GLOBAL") String sede) {
-        return ResponseEntity.ok(Map.of("url", tikTokService.getAuthorizationUrl(sede)));
+    public ResponseEntity<Map<String, String>> getAuthorizeUrl(
+            @RequestParam(required = false, defaultValue = "GLOBAL") String sede,
+            @RequestParam(required = false) String scope
+    ) {
+        return ResponseEntity.ok(Map.of("url", tikTokService.getAuthorizationUrl(sede, scope)));
     }
 
     @PostMapping("/oauth/callback")

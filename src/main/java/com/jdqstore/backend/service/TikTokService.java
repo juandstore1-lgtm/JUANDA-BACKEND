@@ -75,7 +75,11 @@ public class TikTokService {
     public String getEffectiveRedirectUri() {
         Optional<TikTokSettings> opt = settingsRepository.findById(1L);
         if (opt.isPresent() && opt.get().getRedirectUri() != null && !opt.get().getRedirectUri().trim().isEmpty()) {
-            return opt.get().getRedirectUri().trim();
+            String uri = opt.get().getRedirectUri().trim();
+            if ("https://www.juandstore.com/admin/tiktok".equalsIgnoreCase(uri)) {
+                return "https://www.juandstore.com/admin/tiktok/callback";
+            }
+            return uri;
         }
         return defaultRedirectUri != null ? defaultRedirectUri.trim() : "https://www.juandstore.com/admin/tiktok/callback";
     }
@@ -118,6 +122,10 @@ public class TikTokService {
     // --- Generación de URL OAuth 2.0 Oficial ---
 
     public String getAuthorizationUrl(String sedeName) {
+        return getAuthorizationUrl(sedeName, null);
+    }
+
+    public String getAuthorizationUrl(String sedeName, String customScope) {
         String clientKey = getEffectiveClientKey();
         String redirectUri = getEffectiveRedirectUri();
 
@@ -127,7 +135,10 @@ public class TikTokService {
 
         String encodedRedirect = URLEncoder.encode(redirectUri, StandardCharsets.UTF_8);
         String state = "GLOBAL";
-        String scopes = "user.info.basic,video.list,video.publish,video.upload";
+        // Por defecto user.info.basic para compatibilidad inmediata con Login Kit sin causar rechazo de TikTok
+        String scopes = (customScope != null && !customScope.trim().isEmpty())
+                ? customScope.trim()
+                : "user.info.basic";
 
         return "https://www.tiktok.com/v2/auth/authorize/?"
                 + "client_key=" + clientKey
