@@ -135,10 +135,10 @@ public class TikTokService {
 
         String encodedRedirect = URLEncoder.encode(redirectUri, StandardCharsets.UTF_8);
         String state = "GLOBAL";
-        // Por defecto user.info.basic para compatibilidad inmediata con Login Kit sin causar rechazo de TikTok
+        // Ahora que el Sandbox tiene Content Posting API activado y configurado, solicitamos todos los permisos de video
         String scopes = (customScope != null && !customScope.trim().isEmpty())
                 ? customScope.trim()
-                : "user.info.basic";
+                : "user.info.basic,video.list,video.publish,video.upload";
 
         return "https://www.tiktok.com/v2/auth/authorize/?"
                 + "client_key=" + clientKey
@@ -293,7 +293,7 @@ public class TikTokService {
 
         // Si faltan más de 5 minutos para que expire, el token sigue válido
         if (account.getTokenExpiresAt() != null && account.getTokenExpiresAt().isAfter(LocalDateTime.now().plusMinutes(5))) {
-            return account.getAccessToken();
+            return account.getAccessToken() != null ? account.getAccessToken().trim() : "";
         }
 
         // Si expiró y tenemos refresh_token, renovarlo
@@ -337,7 +337,7 @@ public class TikTokService {
             }
         }
 
-        return account.getAccessToken();
+        return account.getAccessToken() != null ? account.getAccessToken().trim() : "";
     }
 
     // --- Cuenta Global (Administrador Global) ---
@@ -407,7 +407,7 @@ public class TikTokService {
             Boolean isDraft
     ) {
         TikTokAccount account = getConnectedGlobalAccount();
-        String accessToken = ensureValidAccessToken(account);
+        String accessToken = ensureValidAccessToken(account) != null ? ensureValidAccessToken(account).trim() : "";
 
         if (videoFile == null || videoFile.isEmpty()) {
             throw new IllegalArgumentException("El archivo de video es obligatorio para publicar.");
