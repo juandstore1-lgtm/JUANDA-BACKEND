@@ -807,30 +807,51 @@ public class TikTokService {
     // --- Helper de validación de respuestas de TikTok ---
 
     private void validateTikTokApiResponse(int httpCode, JsonNode json, String scopeNeeded) {
+        JsonNode errNode = json.path("error");
+        String codeStr = "";
+        String errMsg = "";
+        if (!errNode.isMissingNode() && errNode.has("code")) {
+            codeStr = errNode.path("code").asText("");
+            errMsg = errNode.path("message").asText("");
+        }
+
+        if ("unaudited_client_can_only_post_to_private_accounts".equalsIgnoreCase(codeStr)
+                || (json != null && json.toString().contains("unaudited_client_can_only_post_to_private_accounts"))) {
+            throw new IllegalArgumentException("unaudited_client_can_only_post_to_private_accounts: "
+                    + "TikTok prohíbe que aplicaciones en modo Sandbox (sin auditar) publiquen en cuentas públicas. "
+                    + "Para publicar en Sandbox: 1) Activa 'Cuenta privada' en tu app de TikTok (@juandstore) en tu celular (Ajustes y privacidad > Privacidad > Cuenta privada). "
+                    + "2) Selecciona 'Solo yo' en Privacidad del video o pulsa 'Guardar borrador'.");
+        }
+
         if (httpCode != 200) {
+            if ("scope_not_authorized".equalsIgnoreCase(codeStr)) {
+                throw new IllegalArgumentException("TikTok rechazó la publicación (error: scope_not_authorized). "
+                        + "Tu aplicación en developers.tiktok.com aún no tiene aprobado el permiso oficial '" + scopeNeeded + "'. "
+                        + "Mientras esté en modo desarrollo, agrega la cuenta como Administrador/Tester en la consola de TikTok Developers.");
+            }
+            if ("unaudited_client_can_only_post_to_admin_users".equalsIgnoreCase(codeStr)) {
+                throw new IllegalArgumentException("TikTok rechazó la publicación: Tu aplicación no está auditada comercialmente y solo puede publicar a cuentas asociadas como testers o administradores.");
+            }
+            if ("access_token_invalid".equalsIgnoreCase(codeStr)) {
+                throw new IllegalArgumentException("El token de TikTok expiró o fue revocado. Desconecta y vuelve a conectar tu cuenta.");
+            }
             throw new IllegalArgumentException("TikTok rechazó la petición (HTTP " + httpCode + "): " + json.toString());
         }
 
-        JsonNode errNode = json.path("error");
-        if (!errNode.isMissingNode() && errNode.has("code")) {
-            String codeStr = errNode.path("code").asText("");
-            if (!codeStr.isEmpty() && !"ok".equalsIgnoreCase(codeStr)) {
-                String errMsg = errNode.path("message").asText("Error devuelto por TikTok");
-
-                if ("scope_not_authorized".equalsIgnoreCase(codeStr)) {
-                    throw new IllegalArgumentException("TikTok rechazó la publicación (error: scope_not_authorized). "
-                            + "Tu aplicación en developers.tiktok.com aún no tiene aprobado el permiso oficial '" + scopeNeeded + "'. "
-                            + "Mientras esté en modo desarrollo, agrega la cuenta como Administrador/Tester en la consola de TikTok Developers.");
-                }
-                if ("unaudited_client_can_only_post_to_admin_users".equalsIgnoreCase(codeStr)) {
-                    throw new IllegalArgumentException("TikTok rechazó la publicación: Tu aplicación no está auditada comercialmente y solo puede publicar a cuentas asociadas como testers o administradores.");
-                }
-                if ("access_token_invalid".equalsIgnoreCase(codeStr)) {
-                    throw new IllegalArgumentException("El token de TikTok expiró o fue revocado. Desconecta y vuelve a conectar tu cuenta.");
-                }
-
-                throw new IllegalArgumentException("TikTok rechazó la solicitud (código " + codeStr + "): " + errMsg);
+        if (!codeStr.isEmpty() && !"ok".equalsIgnoreCase(codeStr)) {
+            if ("scope_not_authorized".equalsIgnoreCase(codeStr)) {
+                throw new IllegalArgumentException("TikTok rechazó la publicación (error: scope_not_authorized). "
+                        + "Tu aplicación en developers.tiktok.com aún no tiene aprobado el permiso oficial '" + scopeNeeded + "'. "
+                        + "Mientras esté en modo desarrollo, agrega la cuenta como Administrador/Tester en la consola de TikTok Developers.");
             }
+            if ("unaudited_client_can_only_post_to_admin_users".equalsIgnoreCase(codeStr)) {
+                throw new IllegalArgumentException("TikTok rechazó la publicación: Tu aplicación no está auditada comercialmente y solo puede publicar a cuentas asociadas como testers o administradores.");
+            }
+            if ("access_token_invalid".equalsIgnoreCase(codeStr)) {
+                throw new IllegalArgumentException("El token de TikTok expiró o fue revocado. Desconecta y vuelve a conectar tu cuenta.");
+            }
+
+            throw new IllegalArgumentException("TikTok rechazó la solicitud (código " + codeStr + "): " + (errMsg.isEmpty() ? json.toString() : errMsg));
         }
     }
 
