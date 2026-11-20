@@ -191,6 +191,8 @@ public class TikTokService {
                 throw new IllegalArgumentException("TikTok rechazó la autorización (HTTP " + tokenResponse.statusCode() + "): " + tokenResponse.body());
             }
 
+            log.info("TikTok OAuth token raw response HTTP {}: {}", tokenResponse.statusCode(), tokenResponse.body());
+
             JsonNode tokenJson = objectMapper.readTree(tokenResponse.body());
             if (tokenJson.has("error") && !tokenJson.get("error").isMissingNode()) {
                 JsonNode errNode = tokenJson.get("error");
@@ -201,13 +203,32 @@ public class TikTokService {
                 }
             }
 
-            JsonNode dataNode = tokenJson.path("data");
-            String accessToken = dataNode.path("access_token").asText();
-            String refreshToken = dataNode.path("refresh_token").asText();
-            long expiresIn = dataNode.path("expires_in").asLong(86400L);
-            long refreshExpiresIn = dataNode.path("refresh_expires_in").asLong(31536000L);
-            String openId = dataNode.path("open_id").asText();
-            String scope = dataNode.path("scope").asText("user.info.basic,video.list,video.publish,video.upload");
+            JsonNode dataNode = (tokenJson.has("data") && !tokenJson.get("data").isNull() && !tokenJson.get("data").isMissingNode())
+                    ? tokenJson.get("data")
+                    : tokenJson;
+
+            String accessToken = dataNode.path("access_token").asText("");
+            if (accessToken.isEmpty()) {
+                accessToken = tokenJson.path("access_token").asText("");
+            }
+
+            String refreshToken = dataNode.path("refresh_token").asText("");
+            if (refreshToken.isEmpty()) {
+                refreshToken = tokenJson.path("refresh_token").asText("");
+            }
+
+            long expiresIn = dataNode.path("expires_in").asLong(tokenJson.path("expires_in").asLong(86400L));
+            long refreshExpiresIn = dataNode.path("refresh_expires_in").asLong(tokenJson.path("refresh_expires_in").asLong(31536000L));
+
+            String openId = dataNode.path("open_id").asText("");
+            if (openId.isEmpty()) {
+                openId = tokenJson.path("open_id").asText("");
+            }
+
+            String scope = dataNode.path("scope").asText("");
+            if (scope.isEmpty()) {
+                scope = tokenJson.path("scope").asText("user.info.basic,video.list,video.publish,video.upload");
+            }
 
             // 2. Consultar perfil con el access token
             HttpRequest userRequest = HttpRequest.newBuilder()
@@ -318,10 +339,12 @@ public class TikTokService {
                 HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
                 if (response.statusCode() == 200) {
                     JsonNode json = objectMapper.readTree(response.body());
-                    JsonNode data = json.path("data");
-                    String newAccess = data.path("access_token").asText();
-                    String newRefresh = data.path("refresh_token").asText();
-                    long expiresIn = data.path("expires_in").asLong(86400L);
+                    JsonNode data = (json.has("data") && !json.get("data").isNull() && !json.get("data").isMissingNode())
+                            ? json.get("data")
+                            : json;
+                    String newAccess = data.path("access_token").asText(json.path("access_token").asText(""));
+                    String newRefresh = data.path("refresh_token").asText(json.path("refresh_token").asText(""));
+                    long expiresIn = data.path("expires_in").asLong(json.path("expires_in").asLong(86400L));
 
                     account.setAccessToken(newAccess);
                     if (!newRefresh.isEmpty()) account.setRefreshToken(newRefresh);
@@ -408,6 +431,10 @@ public class TikTokService {
     ) {
         TikTokAccount account = getConnectedGlobalAccount();
         String accessToken = ensureValidAccessToken(account) != null ? ensureValidAccessToken(account).trim() : "";
+
+        if (accessToken.isEmpty()) {
+            throw new IllegalStateException("El token de autorización de TikTok está vacío. Por favor desconecta la cuenta en 'Mi cuenta' y vuelve a presionar 'Conectar con TikTok' para renovar las credenciales.");
+        }
 
         if (videoFile == null || videoFile.isEmpty()) {
             throw new IllegalArgumentException("El archivo de video es obligatorio para publicar.");
