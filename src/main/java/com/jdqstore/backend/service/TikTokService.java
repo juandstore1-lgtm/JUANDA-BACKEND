@@ -1006,8 +1006,17 @@ public class TikTokService {
         LocalDateTime from = calculatePeriodStart(period);
         LocalDateTime to = LocalDateTime.now();
 
-        boolean isLinked = !accountRepository.findByStatus("CONNECTED").isEmpty();
-        List<TikTokVideo> videos = isLinked ? videoRepository.findAllByOrderByPublishedAtDesc() : Collections.emptyList();
+        Optional<TikTokAccount> accOpt = accountRepository.findByStatus("CONNECTED").stream().findFirst();
+        boolean isLinked = accOpt.isPresent();
+        if (isLinked && videoRepository.count() == 0) {
+            try {
+                syncVideosFromTikTok(accOpt.get());
+            } catch (Exception e) {
+                log.warn("Auto-sync de videos en getSummary omitido: {}", e.getMessage());
+            }
+        }
+
+        List<TikTokVideo> videos = videoRepository.findAllByOrderByPublishedAtDesc();
 
         long totalVideos = videos.size();
         long totalViews = videos.stream().mapToLong(v -> v.getViewCount() != null ? v.getViewCount() : 0L).sum();
@@ -1032,8 +1041,17 @@ public class TikTokService {
     // --- Historial de Publicaciones ---
 
     public Map<String, Object> getHistory(String sede, String dateFrom, String dateTo, String search, String contentType, int page, int size) {
-        boolean isLinked = !accountRepository.findByStatus("CONNECTED").isEmpty();
-        List<TikTokVideo> list = isLinked ? videoRepository.findAllByOrderByPublishedAtDesc() : Collections.emptyList();
+        Optional<TikTokAccount> accOpt = accountRepository.findByStatus("CONNECTED").stream().findFirst();
+        boolean isLinked = accOpt.isPresent();
+        if (isLinked && videoRepository.count() == 0) {
+            try {
+                syncVideosFromTikTok(accOpt.get());
+            } catch (Exception e) {
+                log.warn("Auto-sync de videos en getHistory omitido: {}", e.getMessage());
+            }
+        }
+
+        List<TikTokVideo> list = videoRepository.findAllByOrderByPublishedAtDesc();
 
         if (search != null && !search.trim().isEmpty()) {
             String query = search.toLowerCase().trim();
@@ -1067,6 +1085,16 @@ public class TikTokService {
         res.put("videos", paginated);
 
         return res;
+    }
+
+    @Transactional
+    public Map<String, Object> syncVideosNow() {
+        Optional<TikTokAccount> accOpt = accountRepository.findByStatus("CONNECTED").stream().findFirst();
+        if (!accOpt.isPresent()) {
+            return Map.of("success", false, "count", 0, "message", "No hay ninguna cuenta de TikTok conectada actualmente.");
+        }
+        int count = syncVideosFromTikTok(accOpt.get());
+        return Map.of("success", true, "count", count, "message", "Se sincronizaron " + count + " videos oficiales de TikTok.");
     }
 
     // --- Programación Semanal ---

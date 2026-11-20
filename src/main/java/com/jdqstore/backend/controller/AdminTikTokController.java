@@ -140,6 +140,11 @@ public class AdminTikTokController {
         return ResponseEntity.ok(tikTokService.getHistory(sede, dateFrom, dateTo, search, contentType, page, size));
     }
 
+    @PostMapping("/videos/sync")
+    public ResponseEntity<Map<String, Object>> syncVideos() {
+        return ResponseEntity.ok(tikTokService.syncVideosNow());
+    }
+
     // --- Programación Semanal ---
     @GetMapping("/scheduled")
     public ResponseEntity<Map<String, Object>> getWeeklySchedule(
