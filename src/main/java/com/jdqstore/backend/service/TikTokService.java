@@ -194,12 +194,15 @@ public class TikTokService {
             log.info("TikTok OAuth token raw response HTTP {}: {}", tokenResponse.statusCode(), tokenResponse.body());
 
             JsonNode tokenJson = objectMapper.readTree(tokenResponse.body());
-            if (tokenJson.has("error") && !tokenJson.get("error").isMissingNode()) {
+            if (tokenJson.has("error") && !tokenJson.get("error").isMissingNode() && !tokenJson.get("error").isNull()) {
                 JsonNode errNode = tokenJson.get("error");
-                String codeStr = errNode.path("code").asText("");
-                if (!codeStr.isEmpty() && !"ok".equalsIgnoreCase(codeStr)) {
-                    String errMsg = errNode.path("message").asText("Error devuelto por TikTok");
-                    throw new IllegalArgumentException("TikTok devolvió un error (" + codeStr + "): " + errMsg);
+                String errorStr = errNode.isTextual() ? errNode.asText() : errNode.path("code").asText("");
+                if (!errorStr.isEmpty() && !"ok".equalsIgnoreCase(errorStr)) {
+                    String desc = tokenJson.has("error_description")
+                            ? tokenJson.path("error_description").asText()
+                            : errNode.path("message").asText(errorStr);
+                    log.error("TikTok OAuth token exchange error: {} - {}", errorStr, desc);
+                    throw new IllegalArgumentException("TikTok rechazó la autorización: " + desc + " (" + errorStr + ")");
                 }
             }
 
@@ -210,6 +213,11 @@ public class TikTokService {
             String accessToken = dataNode.path("access_token").asText("");
             if (accessToken.isEmpty()) {
                 accessToken = tokenJson.path("access_token").asText("");
+            }
+
+            if (accessToken == null || accessToken.trim().isEmpty()) {
+                log.error("TikTok token response no contiene access_token: {}", tokenResponse.body());
+                throw new IllegalStateException("TikTok no devolvió el access_token oficial. Respuesta: " + tokenResponse.body());
             }
 
             String refreshToken = dataNode.path("refresh_token").asText("");
