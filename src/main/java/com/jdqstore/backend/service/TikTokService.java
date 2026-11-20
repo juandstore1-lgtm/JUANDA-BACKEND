@@ -897,67 +897,88 @@ public class TikTokService {
         try {
             String accessToken = ensureValidAccessToken(account);
             HttpClient client = HttpClient.newBuilder()
-                    .connectTimeout(Duration.ofSeconds(15))
+                    .connectTimeout(Duration.ofSeconds(20))
                     .build();
 
-            String postBody = "{\"max_count\": 20}";
-            HttpRequest request = HttpRequest.newBuilder()
-                    .uri(URI.create("https://open.tiktokapis.com/v2/video/list/?fields=id,title,video_description,duration,cover_image_url,create_time,share_url,like_count,comment_count,share_count,view_count"))
-                    .header("Authorization", "Bearer " + accessToken)
-                    .header("Content-Type", "application/json")
-                    .timeout(Duration.ofSeconds(15))
-                    .POST(HttpRequest.BodyPublishers.ofString(postBody))
-                    .build();
+            long cursor = 0;
+            boolean hasMore = true;
+            int totalSynced = 0;
+            int pageIteration = 0;
 
-            HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
-
-            if (response.statusCode() == 200) {
-                JsonNode root = objectMapper.readTree(response.body());
-                JsonNode videosNode = root.path("data").path("videos");
-                if (videosNode.isArray()) {
-                    int count = 0;
-                    for (JsonNode vNode : videosNode) {
-                        String videoId = vNode.path("id").asText();
-                        if (videoId == null || videoId.isEmpty()) continue;
-
-                        String desc = vNode.path("video_description").asText("");
-                        String title = vNode.path("title").asText(desc.isEmpty() ? "Video TikTok" : desc.split("\n")[0]);
-                        if (title.length() > 250) title = title.substring(0, 247) + "...";
-
-                        int durationSec = vNode.path("duration").asInt(24);
-                        String durationStr = String.format("%d:%02d", durationSec / 60, durationSec % 60);
-
-                        long createTime = vNode.path("create_time").asLong(0);
-                        LocalDateTime publishedAt = createTime > 0
-                                ? LocalDateTime.ofInstant(Instant.ofEpochSecond(createTime), ZoneId.systemDefault())
-                                : LocalDateTime.now();
-
-                        Optional<TikTokVideo> existingOpt = videoRepository.findFirstByVideoId(videoId);
-                        TikTokVideo vid = existingOpt.orElse(TikTokVideo.builder().videoId(videoId).build());
-
-                        vid.setAccountId(account.getId());
-                        vid.setSedeName("GLOBAL");
-                        vid.setTitle(title);
-                        vid.setDescription(desc);
-                        vid.setThumbnailUrl(vNode.path("cover_image_url").asText(null));
-                        vid.setVideoUrl(vNode.path("share_url").asText(null));
-                        vid.setDuration(durationStr);
-                        vid.setPublishedAt(publishedAt);
-                        vid.setViewCount(vNode.path("view_count").asLong(0));
-                        vid.setLikeCount(vNode.path("like_count").asLong(0));
-                        vid.setCommentCount(vNode.path("comment_count").asLong(0));
-                        vid.setShareCount(vNode.path("share_count").asLong(0));
-                        vid.setContentType("Video");
-
-                        videoRepository.save(vid);
-                        count++;
-                    }
-                    log.info("Sincronizados {} videos oficiales de TikTok.", count);
-                    return count;
+            while (hasMore && pageIteration < 15) {
+                pageIteration++;
+                ObjectNode reqBody = objectMapper.createObjectNode();
+                reqBody.put("max_count", 20);
+                if (cursor > 0) {
+                    reqBody.put("cursor", cursor);
                 }
-            } else {
-                log.warn("TikTok Video List devolvió HTTP {}: {}", response.statusCode(), response.body());
+
+                HttpRequest request = HttpRequest.newBuilder()
+                        .uri(URI.create("https://open.tiktokapis.com/v2/video/list/?fields=id,title,video_description,duration,cover_image_url,create_time,share_url,like_count,comment_count,share_count,view_count"))
+                        .header("Authorization", "Bearer " + accessToken)
+                        .header("Content-Type", "application/json")
+                        .timeout(Duration.ofSeconds(20))
+                        .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(reqBody)))
+                        .build();
+
+                HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+
+                if (response.statusCode() == 200) {
+                    JsonNode root = objectMapper.readTree(response.body());
+                    JsonNode dataNode = root.path("data");
+                    JsonNode videosNode = dataNode.path("videos");
+                    if (videosNode.isArray()) {
+                        for (JsonNode vNode : videosNode) {
+                            String videoId = vNode.path("id").asText();
+                            if (videoId == null || videoId.isEmpty()) continue;
+
+                            String desc = vNode.path("video_description").asText("").trim();
+                            String rawTitle = vNode.path("title").asText("").trim();
+                            int durationSec = vNode.path("duration").asInt(0);
+                            String durationStr = String.format("%d:%02d", durationSec / 60, durationSec % 60);
+
+                            String title = !rawTitle.isEmpty()
+                                    ? rawTitle
+                                    : (!desc.isEmpty() ? desc.split("\n")[0] : "Video TikTok " + (!durationStr.equals("0:00") ? "(" + durationStr + ")" : ""));
+                            if (title.length() > 250) title = title.substring(0, 247) + "...";
+
+                            long createTime = vNode.path("create_time").asLong(0);
+                            LocalDateTime publishedAt = createTime > 0
+                                    ? LocalDateTime.ofInstant(Instant.ofEpochSecond(createTime), ZoneId.of("America/Bogota"))
+                                    : LocalDateTime.now(ZoneId.of("America/Bogota"));
+
+                            Optional<TikTokVideo> existingOpt = videoRepository.findFirstByVideoId(videoId);
+                            TikTokVideo vid = existingOpt.orElse(TikTokVideo.builder().videoId(videoId).build());
+
+                            vid.setAccountId(account.getId());
+                            vid.setSedeName("GLOBAL");
+                            vid.setTitle(title);
+                            vid.setDescription(desc);
+                            vid.setThumbnailUrl(vNode.path("cover_image_url").asText(null));
+                            vid.setVideoUrl(vNode.path("share_url").asText(null));
+                            vid.setDuration(durationStr);
+                            vid.setPublishedAt(publishedAt);
+                            vid.setViewCount(vNode.path("view_count").asLong(0));
+                            vid.setLikeCount(vNode.path("like_count").asLong(0));
+                            vid.setCommentCount(vNode.path("comment_count").asLong(0));
+                            vid.setShareCount(vNode.path("share_count").asLong(0));
+                            vid.setContentType("Video");
+
+                            videoRepository.save(vid);
+                            totalSynced++;
+                        }
+                    }
+
+                    hasMore = dataNode.path("has_more").asBoolean(false);
+                    cursor = dataNode.path("cursor").asLong(0);
+                } else {
+                    log.warn("TikTok Video List devolvió HTTP {}: {}", response.statusCode(), response.body());
+                    break;
+                }
             }
+
+            log.info("Sincronizados {} videos oficiales de TikTok en {} páginas.", totalSynced, pageIteration);
+            return totalSynced;
         } catch (Exception e) {
             log.warn("No se pudieron sincronizar videos de TikTok: {}", e.getMessage());
         }
@@ -1059,7 +1080,9 @@ public class TikTokService {
 
         List<TikTokVideo> allVideos = videoRepository.findAllByOrderByPublishedAtDesc();
 
-        // 1. Determinar rango de fechas de filtrado
+        // 1. Determinar rango de fechas de filtrado (usando zona horaria Colombia)
+        ZoneId bogota = ZoneId.of("America/Bogota");
+        LocalDate today = LocalDate.now(bogota);
         LocalDateTime from;
         LocalDateTime to;
 
@@ -1073,38 +1096,38 @@ public class TikTokService {
             if (endDateStr != null && !endDateStr.trim().isEmpty()) {
                 to = LocalDate.parse(endDateStr.trim()).atTime(LocalTime.MAX);
             } else {
-                to = LocalDateTime.now();
+                to = today.atTime(LocalTime.MAX);
             }
         } else {
             String p = (period != null && !period.trim().isEmpty()) ? period.trim().toUpperCase() : "TODO";
             switch (p) {
                 case "HOY":
                 case "DIARIO":
-                    from = LocalDate.now().atStartOfDay();
-                    to = LocalDateTime.now();
+                    from = today.atStartOfDay();
+                    to = today.atTime(LocalTime.MAX);
                     break;
                 case "ESTA_SEMANA":
                 case "SEMANAL":
-                    from = LocalDate.now().with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY)).atStartOfDay();
-                    to = LocalDateTime.now();
+                    from = today.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY)).atStartOfDay();
+                    to = today.atTime(LocalTime.MAX);
                     break;
                 case "ESTE_MES":
                 case "MENSUAL":
-                    from = LocalDate.now().with(TemporalAdjusters.firstDayOfMonth()).atStartOfDay();
-                    to = LocalDateTime.now();
+                    from = today.with(TemporalAdjusters.firstDayOfMonth()).atStartOfDay();
+                    to = today.atTime(LocalTime.MAX);
                     break;
                 case "ULTIMOS_30_DIAS":
-                    from = LocalDateTime.now().minusDays(30);
-                    to = LocalDateTime.now();
+                    from = today.minusDays(30).atStartOfDay();
+                    to = today.atTime(LocalTime.MAX);
                     break;
                 case "ULTIMOS_90_DIAS":
-                    from = LocalDateTime.now().minusDays(90);
-                    to = LocalDateTime.now();
+                    from = today.minusDays(90).atStartOfDay();
+                    to = today.atTime(LocalTime.MAX);
                     break;
                 case "TODO":
                 default:
                     from = LocalDateTime.of(2020, 1, 1, 0, 0);
-                    to = LocalDateTime.now().plusDays(1);
+                    to = today.plusDays(2).atTime(LocalTime.MAX);
                     break;
             }
         }
@@ -1260,6 +1283,22 @@ public class TikTokService {
         }
 
         List<TikTokVideo> list = videoRepository.findAllByOrderByPublishedAtDesc();
+
+        if (dateFrom != null && !dateFrom.trim().isEmpty()) {
+            try {
+                LocalDate dFrom = LocalDate.parse(dateFrom.trim());
+                LocalDateTime fromDt = dFrom.atStartOfDay();
+                list = list.stream().filter(v -> v.getPublishedAt() != null && !v.getPublishedAt().isBefore(fromDt)).collect(Collectors.toList());
+            } catch (Exception ignored) {}
+        }
+
+        if (dateTo != null && !dateTo.trim().isEmpty()) {
+            try {
+                LocalDate dTo = LocalDate.parse(dateTo.trim());
+                LocalDateTime toDt = dTo.atTime(LocalTime.MAX);
+                list = list.stream().filter(v -> v.getPublishedAt() != null && !v.getPublishedAt().isAfter(toDt)).collect(Collectors.toList());
+            } catch (Exception ignored) {}
+        }
 
         if (search != null && !search.trim().isEmpty()) {
             String query = search.toLowerCase().trim();
