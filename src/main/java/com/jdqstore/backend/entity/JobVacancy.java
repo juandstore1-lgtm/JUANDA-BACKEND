@@ -38,7 +38,8 @@ public class JobVacancy {
 
     private String saturdayHours; // "10:00 a. m. - 8:00 p. m." (Sábados)
 
-    private String workDays; // "Lun,Mar,Mié,Jue,Vie,Sáb"
+    @Column(columnDefinition = "TEXT")
+    private String workDays; // "Lun,Mar,Mié,Jue,Vie,Sáb" o fechas de temporada
 
     private String sundayPolicy; // "Domingos intercalados"
 
